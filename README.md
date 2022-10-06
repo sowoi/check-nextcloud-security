@@ -77,4 +77,4 @@ Options:
 Licensed under the terms of Apache License Version 2. See LICENSE file.
 
 # More
-[Dev-Site okxo.de](https://okxo.de/nextcloud-security/)
+[Dev-Site okxo.de](https://okxo.de/regularly-check-your-nextcloud-instance-for-vulnerabilities)
