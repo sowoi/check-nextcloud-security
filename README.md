@@ -38,13 +38,15 @@ object CheckCommand "check_nextcloud_security" {
 
 ```
 
-- Create a new Service object:
+- Create a new Service object.
+- Please do not run the query too often or you will be banned. In the template below 24 hours are given. I would not have it checked more often than that. 
 
 ```
 object Service "Service: Nextcloud Security Scan" {
    import               "generic-service"
    host_name =          "YOUR NEXTCLOUD HOST"
    check_command =      "check_nextcloud_security"
+   check_interval = 24h
 }
 ```
 
