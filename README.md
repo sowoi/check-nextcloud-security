@@ -18,6 +18,7 @@ This check uses Nextcloud's own security scan at scan.nextcloud.com to check if 
 Icinga2 / Nagios: 
 - Put the Python script to your Pluginfolder. Usually /usr/lib/nagios/plugins/
 - Create a new command custome command:
+
 ```
 object CheckCommand "check_nextcloud_security" {
     import "plugin-check-command"
