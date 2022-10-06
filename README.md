@@ -54,10 +54,9 @@ object Service "Service: Nextcloud Security Scan" {
 # CLI Usage
 - "python3 check_nextcloud_security.py -h" will show you a manual.
 
-```
-Usage: check_nextcloud_security.py -h 
+- Usage: check_nextcloud_security.py -h 
 
-Options:
+# Options:
   -h, --help            show this help message and exit
 
   Generic options:
@@ -72,8 +71,6 @@ Options:
                         Nextcloud server adress
 
 
-
-```
 
 # License
 Licensed under the terms of Apache License Version 2. See LICENSE file.
