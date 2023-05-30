@@ -71,6 +71,16 @@ object Service "Service: Nextcloud Security Scan" {
     -P HOST, --proxy=HOST
                         Nextcloud server adress
 
+# Example output
+```Shell
+python3 check_nextcloud_security.py -H nexcloud.example.com
+CRITICAL: This server version is end of life and has no security fixes anymore. 
+ Nextcloud 24.0.11.1  on  nextcloud.example.com , rating is  F , last scanned:  2023-05-30 07:48:58.000000
+
+python3 check_nextcloud_security.py -H ok.nextlcoud.example.com
+OK: Server is up to date. No known vulnerabilities 
+ Nextcloud 26.0.2.1  on  nextcloud.example.com , rating is  A+ , last scanned:  2023-05-29 08:50:58.000000
+```
 
 
 # License
