@@ -72,6 +72,7 @@ object Service "Service: Nextcloud Security Scan" {
                         Nextcloud server adress
 
 # Example output
+
 ```Shell
 python3 check_nextcloud_security.py -H nexcloud.example.com
 CRITICAL: This server version is end of life and has no security fixes anymore. 
