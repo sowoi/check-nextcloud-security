@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "check-nextcloud-security"
+version = "0.1.0"
+description = ""
+authors = ["Massoud Ahmed <massoud.ahmed@telekom.de>"]
+readme = "README.md"
+packages = [{include = "check_nextcloud_security"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+certifi = "^2023.5.7"
+requests = "^2.31.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
