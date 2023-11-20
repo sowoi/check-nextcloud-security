@@ -8,7 +8,7 @@ packages = [{include = "check_nextcloud_security"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-certifi = "^2023.7.22"
+certifi = "^2023.11.17"
 requests = "^2.31.0"
 
 
