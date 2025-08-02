@@ -4,10 +4,10 @@
 
 # pylint: disable=invalid-name,line-too-long
 
+import argparse
 import logging
 import re
 import sys
-from optparse import OptionGroup, OptionParser
 
 import requests
 
@@ -195,55 +195,50 @@ def checkVulnerabilities(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
 
-    desc = """%prog checks your nextcloud server for vulnerabilities """
-    parser = OptionParser(description=desc)
-    gen_opts = OptionGroup(parser, "Generic options")
-    host_opts = OptionGroup(parser, "Host options")
-    proxy_opts = OptionGroup(parser, "Proxy options")
-
-    parser.add_option_group(gen_opts)
-    parser.add_option_group(host_opts)
-    parser.add_option_group(proxy_opts)
+    # Sub-groups using ArgumentParser groups
+    gen_opts = parser.add_argument_group("Generic options")
+    host_opts = parser.add_argument_group("Host options")
+    proxy_opts = parser.add_argument_group("Proxy options")
 
     # -d / --debug
-    gen_opts.add_option(
+    gen_opts.add_argument(
         "-d",
         "--debug",
         dest="debug",
         default=False,
         action="store_true",
-        help="enable debugging outputs (default: no)",
+        help="Enable debugging outputs (default: no)",
     )
 
     # -H / --host
-    host_opts.add_option(
+    host_opts.add_argument(
         "-H",
         "--host",
         dest="host",
         default=None,
-        action="store",
         metavar="HOST",
-        help="Nextcloud server adress",
+        help="Nextcloud server address",
     )
 
     # -P / --proxy
-    proxy_opts.add_option(
+    proxy_opts.add_argument(
         "-P",
         "--proxy",
         dest="proxy",
         default=None,
-        action="store",
         metavar="HOST",
-        help="Proxy server adress",
+        help="Proxy server address",
     )
 
     # parse arguments
-    (options, args) = parser.parse_args()
+    options = parser.parse_args()
+
 
     if (options.host) is None:
         print("Please define host IP or hostname. Use -h to show help")
-        exit(3)
+        sys.exit(3)
 
     # set loggin
     if options.debug:
