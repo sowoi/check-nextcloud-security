@@ -1,29 +1,34 @@
 #! /usr/bin/python3
-# Check nextcloud instance for known vulnerabilities on scan.nextcloud.com
+"""Check nextcloud instance for known vulnerabilities on scan.nextcloud.com"""
 # Developer: Massoud Ahmed, Georg Schlagholz (IT-Native GmbH)
 
+# pylint: disable=invalid-name,line-too-long
 
+import argparse
 import logging
 import re
 import sys
-from optparse import OptionGroup, OptionParser
 
 import requests
 
 LOGGER = logging.getLogger("check_nextcloud")
 
 
-def checkIfIPorHost(host, logging):
+def checkIfIPorHost(host, debug):
+    """Check if the host is an IP address or a hostname"""
     regex = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
     result = regex.match(host)
-    if logging:
+    if debug:
         print(result)
     if result:
         print("IP addresses are not supported by the Scan API.")
         sys.exit(3)
 
 
-def checkVulnerabilities(host, proxy):
+def checkVulnerabilities(
+    host, proxy
+):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+    """Check the Nextcloud instance for known vulnerabilities"""
     c = 0
     w = 0
 
@@ -35,10 +40,10 @@ def checkVulnerabilities(host, proxy):
         "url": host,
     }
 
-    LOGGER.debug("Scanning server adress" + host)
+    LOGGER.debug("Scanning server adress %s", host)
 
     if proxy is not None:
-        LOGGER.debug("Using proxy " + proxy)
+        LOGGER.debug("Using proxy %s", proxy)
         proxies = {
             "http": proxy,
             "https": proxy,
@@ -49,23 +54,25 @@ def checkVulnerabilities(host, proxy):
             headers=headers,
             data=data,
             proxies=proxies,
+            timeout=10,
         )
     else:
         response = requests.post(
-            "https://scan.nextcloud.com/api/queue", headers=headers, data=data
+            "https://scan.nextcloud.com/api/queue", headers=headers, data=data, timeout=10
         )
     try:
         answer = response.json()
-    except Exception:
+    except Exception as e:  # pylint: disable=broad-except
         print(
             "UNKNOWN: ",
             host,
             "Scan failed! The scan for",
             host,
-            "failed. Either no Nextcloud or ownCloud can be found there or you tried to scan too many servers.",
+            "failed. Either no Nextcloud or ownCloud can be found there or you tried to scan too many servers: ",
+            e,
         )
         sys.exit(3)
-    LOGGER.debug("Got response from scan.nextcloud.com: \n", answer)
+    LOGGER.debug("Got response from scan.nextcloud.com: \n%s", answer)
     if isinstance(answer, str) and answer == "Too many instances queued.":
         LOGGER.warning("Nextcloud scan is rate limited: Too many instances queued.")
         print(
@@ -78,12 +85,11 @@ def checkVulnerabilities(host, proxy):
         )
         sys.exit(3)
     uuidSite = "https://scan.nextcloud.com/api/result/" + str(answer["uuid"])
-    LOGGER.debug("UUID is: " + str(answer["uuid"]))
-    requeue = "https://scan.nextcloud.com/api/requeue"
+    LOGGER.debug("UUID is: %s", str(answer["uuid"]))
     if proxy is not None:
-        checkUUID = requests.get(uuidSite, proxies=proxies)
+        checkUUID = requests.get(uuidSite, proxies=proxies, timeout=10)
     else:
-        checkUUID = requests.get(uuidSite)
+        checkUUID = requests.get(uuidSite, timeout=10)
     responseScan = checkUUID.json()
 
     rating = responseScan["rating"]
@@ -104,35 +110,35 @@ def checkVulnerabilities(host, proxy):
     elif rating == 0:
         rate = "F"
         c = 1
-
-    if rating == 0:
+        msg = "CRITICAL: This server version is end of life and has no security fixes anymore."
+    else:
+        rate = "Unknown"
         c = 1
-        critical = "CRITICAL: This server version is end of life and has no security fixes anymore."
 
     if len(responseScan["vulnerabilities"]) == 0:
         if rating == 5:
-            ok = "OK: Server is up to date. No known vulnerabilities"
+            msg = "OK: Server is up to date. No known vulnerabilities"
         elif rating == 4:
-            ok = "OK: Update available, but no known vulnerabilities"
+            msg = "OK: Update available, but no known vulnerabilities"
 
     else:
         if rating == 1:
             c = 1
-            critical = (
+            msg = (
                 "CRITICAL: found ",
                 str(len(responseScan["vulnerabilities"])),
-                ' vulnerabilities.  This server is vulnerable to at least one vulnerability rated "high"',
+                ' vulnerabilities. This server is vulnerable to at least one vulnerability rated "high"',
             )
         elif rating == 2:
             w = 1
-            warning = (
+            msg = (
                 "Warning: found ",
                 str(len(responseScan["vulnerabilities"])),
                 ' vulnerabilities. This server is vulnerable to at least one vulnerability rated "medium".',
             )
         elif rating == 3:
             w = 1
-            warning = (
+            msg = (
                 "Warning: found ",
                 str(len(responseScan["vulnerabilities"])),
                 ' vulnerabilities. This server is vulnerable to at least one vulnerability rated "low".',
@@ -140,9 +146,13 @@ def checkVulnerabilities(host, proxy):
 
     scanDate = responseScan["scannedAt"]["date"]
 
+    # Set the message if none was set before
+    if not msg:
+        msg = "UNKNOWN: The scan result is unknown. Please check the scan result manually."
+
     if c == 1:
         print(
-            critical,
+            msg,
             "\n",
             responseScan["product"],
             responseScan["version"],
@@ -156,7 +166,7 @@ def checkVulnerabilities(host, proxy):
         sys.exit(2)
     elif w == 1:
         print(
-            warning,
+            msg,
             "\n",
             responseScan["product"],
             responseScan["version"],
@@ -170,7 +180,7 @@ def checkVulnerabilities(host, proxy):
         sys.exit(1)
     else:
         print(
-            ok,
+            msg,
             "\n",
             responseScan["product"],
             responseScan["version"],
@@ -185,58 +195,50 @@ def checkVulnerabilities(host, proxy):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
 
-    desc = """%prog checks your nextcloud server for vulnerabilities """
-    parser = OptionParser(description=desc)
-    gen_opts = OptionGroup(parser, "Generic options")
-    host_opts = OptionGroup(parser, "Host options")
-    proxy_opts = OptionGroup(parser, "Proxy options")
-
-    parser.add_option_group(gen_opts)
-    parser.add_option_group(host_opts)
-    parser.add_option_group(proxy_opts)
+    # Sub-groups using ArgumentParser groups
+    gen_opts = parser.add_argument_group("Generic options")
+    host_opts = parser.add_argument_group("Host options")
+    proxy_opts = parser.add_argument_group("Proxy options")
 
     # -d / --debug
-    gen_opts.add_option(
+    gen_opts.add_argument(
         "-d",
         "--debug",
         dest="debug",
         default=False,
         action="store_true",
-        help="enable debugging outputs (default: no)",
+        help="Enable debugging outputs (default: no)",
     )
 
     # -H / --host
-    host_opts.add_option(
+    host_opts.add_argument(
         "-H",
         "--host",
         dest="host",
         default=None,
-        action="store",
         metavar="HOST",
-        help="Nextcloud server adress",
+        help="Nextcloud server address",
     )
 
     # -P / --proxy
-    proxy_opts.add_option(
+    proxy_opts.add_argument(
         "-P",
         "--proxy",
         dest="proxy",
         default=None,
-        action="store",
         metavar="HOST",
-        help="Nextcloud server adress",
+        help="Proxy server address",
     )
 
     # parse arguments
-    (options, args) = parser.parse_args()
+    options = parser.parse_args()
 
-    host = options.host
-    proxy = options.proxy
 
     if (options.host) is None:
         print("Please define host IP or hostname. Use -h to show help")
-        exit(3)
+        sys.exit(3)
 
     # set loggin
     if options.debug:
@@ -245,5 +247,5 @@ if __name__ == "__main__":
     else:
         logging.basicConfig()
         LOGGER.setLevel(logging.INFO)
-    checkIfIPorHost(host, options.debug)
-    checkVulnerabilities(host, proxy)
+    checkIfIPorHost(options.host, options.debug)
+    checkVulnerabilities(options.host, options.proxy)

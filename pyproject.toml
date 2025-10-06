@@ -1,15 +1,15 @@
 [tool.poetry]
 name = "check-nextcloud-security"
 version = "0.1.0"
-description = ""
+description = "Check the security level of your Nextcloud instance with the Nextcloud Security API "
 authors = ["Massoud Ahmed <massoud.ahmed@telekom.de>"]
 readme = "README.md"
-packages = [{include = "check_nextcloud_security"}]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.10"
-certifi = "^2023.7.22"
-requests = "^2.31.0"
+certifi = "^2025.7.14"
+requests = "^2.32.4"
 
 
 [build-system]
