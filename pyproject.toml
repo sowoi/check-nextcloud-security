@@ -1,17 +1,23 @@
-[tool.poetry]
+[project]
 name = "check-nextcloud-security"
 version = "0.1.0"
 description = "Check the security level of your Nextcloud instance with the Nextcloud Security API "
-authors = ["Massoud Ahmed <massoud.ahmed@telekom.de>"]
+authors = [{ name = "Massoud Ahmed", email = "trapez.klinge-4m@icloud.com" }]
+requires-python = "~=3.11.0"
 readme = "README.md"
-package-mode = false
+dependencies = [
+    "certifi>=2025.7.14,<2026",
+    "requests>=2.32.4,<3",
+]
 
-[tool.poetry.dependencies]
-python = "^3.10"
-certifi = "^2025.7.14"
-requests = "^2.32.4"
-
+[tool.uv]
+package = false
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pylint>=4.0.2",
+]
