@@ -1,3 +1,16 @@
+<!-- TOC -->
+* [check-nextcloud-security](#check-nextcloud-security)
+* [Features](#features)
+* [Prerequisites](#prerequisites)
+* [Installation](#installation)
+* [CLI Usage](#cli-usage)
+* [Options:](#options)
+* [Rescan](#rescan)
+* [Example output](#example-output)
+* [License](#license)
+* [More](#more)
+<!-- TOC -->
+
 # check-nextcloud-security
 Check the security level of your Nextcloud instance with the Nextcloud Security API
 
@@ -23,20 +36,30 @@ Icinga2 / Nagios:
 object CheckCommand "check_nextcloud_security" {
     import "plugin-check-command"
     command = [ PluginDir + "/check_nextcloud_security.py" ]
+
     arguments += {
         "--host" = {
-            description = "hostname"
+            description = "Nextcloud hostname or URL"
             required = true
             value = "$address$"
         }
-        
+
         "--proxy" = {
-            description = "Web Proxy"
+            description = "HTTP/HTTPS proxy (optional)"
             required = false
+        }
+
+        "--rescan" = {
+            description = "Trigger a new scan on each check (optional)"
+            set_if = "$nextcloud_rescan$"
+        }
+
+        "--debug" = {
+            description = "Enable debugging output (optional)"
+            set_if = "$nextcloud_debug$"
         }
     }
 }
-
 ```
 
 - Create a new Service object.
@@ -58,18 +81,18 @@ object Service "Service: Nextcloud Security Scan" {
 - Usage: check_nextcloud_security.py -h 
 
 # Options:
-  -h, --help            show this help message and exit
+| Option         | Description                                            | Default      |
+| :------------- | :----------------------------------------------------- | :----------- |
+| `-H, --host`   | Nextcloud server address (hostname or URL)             | **required** |
+| `-P, --proxy`  | Proxy server address                                   | *None*       |
+| `-r, --rescan` | Trigger a fresh scan each time (slower, more accurate) | *False*      |
+| `-d, --debug`  | Enable verbose debugging output                        | *False*      |
+| `-h, --help`   | Show help and exit                                     | —            |
 
-  Generic options:
-    -d, --debug         enable debugging outputs (default: no)
+# Rescan
+Too many checks with `--rescan True` may lead to result no further scans being possible for a certain period of time.  
+As a rule, it is sufficient to perform one scan per day.
 
-  Host options:
-    -H HOST, --host=HOST
-                        Nextcloud server adress
-
-  Proxy options:
-    -P HOST, --proxy=HOST
-                        Nextcloud server adress
 
 # Example output
 
@@ -78,9 +101,11 @@ python3 check_nextcloud_security.py -H nexcloud.example.com
 CRITICAL: This server version is end of life and has no security fixes anymore. 
  Nextcloud 24.0.11.1  on  nextcloud.example.com , rating is  F , last scanned:  2023-05-30 07:48:58.000000
 
-python3 check_nextcloud_security.py -H ok.nextlcoud.example.com
+python3 check_nextcloud_security.py -H nextlcoud.example.com
 OK: Server is up to date. No known vulnerabilities 
  Nextcloud 26.0.2.1  on  nextcloud.example.com , rating is  A+ , last scanned:  2023-05-29 08:50:58.000000
+ 
+ 
 ```
 
 
