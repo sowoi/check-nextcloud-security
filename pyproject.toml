@@ -21,3 +21,10 @@ build-backend = "hatchling.build"
 dev = [
     "pylint>=4.0.2",
 ]
+test = [
+    "pytest>=9.0.0",
+    "pytest-mock>=3.15.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = "."

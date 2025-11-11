@@ -81,6 +81,8 @@ def send_scan_request(
         print(f"UNKNOWN: Could not retrieve scan results for {host}: {e}")
         sys.exit(3)
 
+    print(response_scan)
+
     return headers, data, response_scan, uuid
 
 
