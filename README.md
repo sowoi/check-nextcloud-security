@@ -27,6 +27,11 @@ This check uses Nextcloud's own security scan at scan.nextcloud.com to check if 
 
 # Installation
 - Download check_nextcloud_security.py to your local Nextcloud server or wherever you want to run the check.
+- Install requirements using pip
+```
+pip install -r requirements.txt
+```
+
 
 Icinga2 / Nagios: 
 - Put the Python script to your Pluginfolder. Usually /usr/lib/nagios/plugins/
@@ -63,7 +68,7 @@ object CheckCommand "check_nextcloud_security" {
 ```
 
 - Create a new Service object.
-- Please do not run the query too often or you will be banned. In the template below 24 hours are given. I would not have it checked more often than that. 
+- Please do not run the query too often or you will be banned. In the template below 24 hours are given. Normally, one check every 24 hours is sufficient. 
 
 ```
 object Service "Service: Nextcloud Security Scan" {
@@ -76,9 +81,12 @@ object Service "Service: Nextcloud Security Scan" {
 
 
 # CLI Usage
-- "python3 check_nextcloud_security.py -h" will show you a manual.
+- `python3 check_nextcloud_security.py -h` will show you a manual.
 
-- Usage: check_nextcloud_security.py -h 
+## Command
+```
+python3 check_nextcloud_security.py --host <Hostname> --rescan
+```
 
 # Options:
 | Option         | Description                                            | Default      |
@@ -89,10 +97,10 @@ object Service "Service: Nextcloud Security Scan" {
 | `-d, --debug`  | Enable verbose debugging output                        | *False*      |
 | `-h, --help`   | Show help and exit                                     | —            |
 
+
 # Rescan
 Too many checks with `--rescan True` may lead to result no further scans being possible for a certain period of time.  
 As a rule, it is sufficient to perform one scan per day.
-
 
 # Example output
 
