@@ -1,4 +1,4 @@
-from check_nextcloud_security import send_scan_request
+from check_nextcloud_security import send_scan_request, ScanContext, ScanResult
 
 import pytest
 from unittest.mock import MagicMock
@@ -6,11 +6,9 @@ from unittest.mock import MagicMock
 def test_send_scan_request_success(mocker) -> None:
     """
     Tests the successful execution of send_scan_request.
-
-    Mocks both the initial POST request (to start the scan) and the subsequent
-    GET request (to retrieve the result), simulating a successful scan with
-    a 'rating' of 5 (best) and asserts the returned data structure and content.
     """
+    context = ScanContext(host="nextcloud.nextcloud.com")
+
     # mock for post
     mock_scan_post = mocker.patch("check_nextcloud_security.requests.post")
     mock_response_post = MagicMock()
@@ -34,14 +32,13 @@ def test_send_scan_request_success(mocker) -> None:
                                            'EOL': False, 'latestVersionInBranch': True}
     mock_scan_get.return_value = mock_response_get
 
-    headers, data, response_scan, uuid = send_scan_request("nextcloud.nextcloud.com", None)
+    result: ScanResult = send_scan_request(context)
 
-    assert headers["Content-type"] == "application/x-www-form-urlencoded"
-    assert data == {"url": "nextcloud.nextcloud.com"}
-    assert response_scan['rating'] == 5
-    assert uuid == "123-uid"
-
+    assert isinstance(result, ScanResult)
+    assert result.uuid == "123-uid"
+    assert result.response['rating'] == 5
     mock_scan_post.assert_called_once()
+    assert mock_scan_post.call_args.kwargs['data'] == {'url': 'nextcloud.nextcloud.com'}
     mock_scan_get.assert_called_once()
 
 
@@ -49,11 +46,9 @@ def test_send_scan_request_critical(mocker) -> None:
     """
     Tests the successful execution of send_scan_request when critical issues
     are present in the scan result.
-
-    Mocks both the POST and GET requests, simulating a scan that returns a
-    low 'rating' (0), indicates 'EOL' (End-of-Life), and is not the
-    'latestVersionInBranch'. Asserts the critical values are correctly captured.
     """
+    context = ScanContext(host="nextcloud.nextcloud.com")
+
     # mock for post
     mock_scan_post = mocker.patch("check_nextcloud_security.requests.post")
     mock_response_post = MagicMock()
@@ -77,14 +72,13 @@ def test_send_scan_request_critical(mocker) -> None:
                                            'EOL': True, 'latestVersionInBranch': False}
     mock_scan_get.return_value = mock_response_get
 
-    headers, data, response_scan, uuid = send_scan_request("nextcloud.nextcloud.com", None)
+    result: ScanResult = send_scan_request(context)
 
-    assert headers["Content-type"] == "application/x-www-form-urlencoded"
-    assert data == {"url": "nextcloud.nextcloud.com"}
-    assert response_scan['rating'] == 0
-    assert response_scan['EOL']
-    assert not response_scan['latestVersionInBranch']
-    assert uuid == "123-uid"
+    assert isinstance(result, ScanResult)
+    assert result.uuid == "123-uid"
+    assert result.response['rating'] == 0
+    assert result.response['EOL']
+    assert not result.response['latestVersionInBranch']
 
     mock_scan_post.assert_called_once()
     mock_scan_get.assert_called_once()
@@ -94,13 +88,13 @@ def test_send_scan_request_post_failure(mocker):
     """
     Tests that send_scan_request exits with code 3 if the initial POST request fails
     (e.g., due to network error, connection refusal, etc.).
-
-    Mocks requests.post to raise an Exception and asserts SystemExit with code 3.
     """
+    context = ScanContext(host="nextcloud.nextlcoud.com")
+
     mocker.patch("check_nextcloud_security.requests.post", side_effect=Exception("Network error"))
 
     with pytest.raises(SystemExit) as e:
-        send_scan_request("nextcloud.nextlcoud.com", None)
+        send_scan_request(context) # Aufruf mit Context
 
     assert e.value.code == 3
 
@@ -109,15 +103,16 @@ def test_send_scan_request_too_many_instances(mocker):
     """
     Tests that send_scan_request exits with code 3 if the scan API reports
     that too many instances have been submitted recently.
-
-    Mocks the POST response to return the specific 'Too many instances' string.
     """
+    # Erstellung des ScanContext-Objekts
+    context = ScanContext(host="nextcloud.nextlcoud.com")
+
     mock_post = mocker.patch("check_nextcloud_security.requests.post")
     mock_post.return_value.json.return_value = "Too many instances"
     mock_post.return_value.raise_for_status.return_value = None
 
     with pytest.raises(SystemExit) as e:
-        send_scan_request("nextcloud.nextlcoud.com", None)
+        send_scan_request(context)
 
     assert e.value.code == 3
 
@@ -126,14 +121,14 @@ def test_send_scan_request_missing_uuid(mocker):
     """
     Tests that send_scan_request exits with code 3 if the initial POST request
     succeeds but does not return the required 'uuid' in the JSON response.
-
-    Mocks the POST response to return an empty dictionary.
     """
+    context = ScanContext(host="nextcloud.nextlcoud.com")
+
     mock_post = mocker.patch("check_nextcloud_security.requests.post")
     mock_post.return_value.json.return_value = {}
     mock_post.return_value.raise_for_status.return_value = None
 
     with pytest.raises(SystemExit) as e:
-        send_scan_request("nextcloud.nextlcoud.com", None)
+        send_scan_request(context)
 
     assert e.value.code == 3

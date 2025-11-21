@@ -4,6 +4,7 @@
 * [Prerequisites](#prerequisites)
 * [Installation](#installation)
 * [CLI Usage](#cli-usage)
+  * [Command](#command)
 * [Options:](#options)
 * [Rescan](#rescan)
 * [Example output](#example-output)
@@ -34,8 +35,8 @@ pip install -r requirements.txt
 
 
 Icinga2 / Nagios: 
-- Put the Python script to your Pluginfolder. Usually /usr/lib/nagios/plugins/
-- Create a new command custome command:
+- Put the Python script to your plugin folder. Usually /usr/lib/nagios/plugins/
+- Create a new command custom command:
 
 ```
 object CheckCommand "check_nextcloud_security" {
@@ -68,7 +69,7 @@ object CheckCommand "check_nextcloud_security" {
 ```
 
 - Create a new Service object.
-- Please do not run the query too often or you will be banned. In the template below 24 hours are given. Normally, one check every 24 hours is sufficient. 
+- Please do not run the query too often, or you will be banned. In the template below 24 hours are given. Normally, one check every 24 hours is sufficient. 
 
 ```
 object Service "Service: Nextcloud Security Scan" {
@@ -90,7 +91,7 @@ python3 check_nextcloud_security.py --host <Hostname> --rescan
 
 # Options:
 | Option         | Description                                            | Default      |
-| :------------- | :----------------------------------------------------- | :----------- |
+|:---------------|:-------------------------------------------------------|:-------------|
 | `-H, --host`   | Nextcloud server address (hostname or URL)             | **required** |
 | `-P, --proxy`  | Proxy server address                                   | *None*       |
 | `-r, --rescan` | Trigger a fresh scan each time (slower, more accurate) | *False*      |
