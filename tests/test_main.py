@@ -1,7 +1,7 @@
 import pytest
 import sys
-
 import check_nextcloud_security as cns
+from check_nextcloud_security import ScanContext, ScanResult
 
 
 def test_main_calls_all_functions(mocker):
@@ -13,13 +13,16 @@ def test_main_calls_all_functions(mocker):
     Specifically checks if 'check_if_ip_or_host', 'send_scan_request',
     and 'check_vulnerabilities' are called once with expected arguments.
     """
-    test_args = ["prog", "-H", "example.com"]
+    test_args = ["prog", "-H", "nextcloud.example.com"]
     mocker.patch.object(sys, "argv", test_args)
-
     mock_check_ip = mocker.patch("check_nextcloud_security.check_if_ip_or_host")
+    mock_scan_result = ScanResult(
+        response={"status": "ok"},
+        uuid="uuid123"
+    )
     mock_send_scan = mocker.patch(
         "check_nextcloud_security.send_scan_request",
-        return_value=({"h": "v"}, {"url": "example.com"}, {"status": "ok"}, "uuid123"),
+        return_value=mock_scan_result,
     )
     mock_check_vuln = mocker.patch("check_nextcloud_security.check_vulnerabilities")
 
@@ -27,11 +30,16 @@ def test_main_calls_all_functions(mocker):
 
     cns.main()
 
-    mock_check_ip.assert_called_once_with("example.com")
-    mock_send_scan.assert_called_once_with("example.com", None)
-    mock_check_vuln.assert_called_once_with(
-        None, False, {"h": "v"}, {"url": "example.com"}, {"status": "ok"}, "uuid123"
+    expected_context = ScanContext(
+        host="nextcloud.example.com",
+        proxy=None,
+        debug=False,
+        rescan=False
     )
+
+    mock_check_ip.assert_called_once_with("nextcloud.example.com")
+    mock_send_scan.assert_called_once_with(expected_context)
+    mock_check_vuln.assert_called_once_with(expected_context, mock_scan_result)
 
 
 def test_main_debug_mode_enables_debug_logging(mocker):
@@ -42,14 +50,15 @@ def test_main_debug_mode_enables_debug_logging(mocker):
     Mocks logging.basicConfig and asserts that it is called with the
     correct 'level' keyword argument.
     """
-    test_args = ["prog", "-H", "example.com", "-d"]
+    test_args = ["prog", "-H", "nextcloud.example.com", "-d"]
     mocker.patch.object(sys, "argv", test_args)
 
     mock_basic_config = mocker.patch("check_nextcloud_security.logging.basicConfig")
     mocker.patch("check_nextcloud_security.check_if_ip_or_host")
+
     mocker.patch(
         "check_nextcloud_security.send_scan_request",
-        return_value=({}, {}, {}, "uuid"),
+        return_value=ScanResult(response={}, uuid="uuid"),
     )
     mocker.patch("check_nextcloud_security.check_vulnerabilities")
 

@@ -3,23 +3,43 @@
 Check a Nextcloud instance for known vulnerabilities using scan.nextcloud.com API.
 Authors: Massoud Ahmed, Georg Schlagholz (IT-Native GmbH)
 """
-
-from __future__ import annotations
-
 import argparse
 import logging
 import re
 import sys
-from typing import Any, Dict, Tuple, Optional
-
+from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
 import requests
 
-# --- Setup ---
 LOGGER = logging.getLogger("check_nextcloud")
-
 SCAN_QUEUE_URL = "https://scan.nextcloud.com/api/queue"
 SCAN_RESULT_URL = "https://scan.nextcloud.com/api/result"
 SCAN_REQUEUE_URL = "https://scan.nextcloud.com/api/requeue"
+
+
+@dataclass(frozen=True)
+class ScanContext:
+    host: str
+    proxy: Optional[str] = None
+    debug: bool = False
+    rescan: bool = False
+
+
+@dataclass(frozen=True)
+class ScanRequestInfo:
+    headers: Dict[str, str] = field(default_factory=lambda: {
+        "Content-type": "application/x-www-form-urlencoded",
+        "X-CSRF": "true",
+    })
+    data: Dict[str, str] = field(default_factory=dict)
+    proxies: Optional[Dict[str, str]] = None
+    uuid: Optional[str] = None
+
+
+@dataclass
+class ScanResult:
+    response: Dict[str, Any]
+    uuid: str
 
 
 # --- Utility Functions ---
@@ -30,34 +50,31 @@ def check_if_ip_or_host(host: str) -> None:
         sys.exit(3)
 
 
-def send_scan_request(
-    host: str, proxy: Optional[str]
-) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, Any], str]:
+def send_scan_request(context: ScanContext) -> ScanResult:
     """Send initial security check request to the Nextcloud Scan Server."""
-    headers: Dict[str, str] = {
-        "Content-type": "application/x-www-form-urlencoded",
-        "X-CSRF": "true",
-    }
-    data: Dict[str, str] = {"url": host}
-    proxies = {"http": proxy, "https": proxy} if proxy else None
 
-    LOGGER.debug("Initiating scan for host: %s", host)
-    if proxy:
-        LOGGER.debug("Using proxy: %s", proxy)
+    request_info = ScanRequestInfo(
+        data={"url": context.host},
+        proxies={"http": context.proxy, "https": context.proxy} if context.proxy else None
+    )
+
+    LOGGER.debug("Initiating scan for host: %s", context.host)
+    if context.proxy:
+        LOGGER.debug("Using proxy: %s", context.proxy)
 
     try:
         response = requests.post(
             SCAN_QUEUE_URL,
-            headers=headers,
-            data=data,
-            proxies=proxies,
+            headers=request_info.headers,
+            data=request_info.data,
+            proxies=request_info.proxies,
             timeout=10,
         )
         response.raise_for_status()
         answer = response.json()
     except Exception as e:
         print(
-            f"UNKNOWN: {host} Scan failed! Either no Nextcloud/ownCloud found "
+            f"UNKNOWN: {context.host} Scan failed! Either no Nextcloud/ownCloud found "
             f"or too many scans queued: {e}"
         )
         sys.exit(3)
@@ -65,44 +82,49 @@ def send_scan_request(
     LOGGER.debug("Response from scan.nextcloud.com: %s", answer)
 
     if isinstance(answer, str) and "Too many instances" in answer:
-        print(f"UNKNOWN: {host} Scan failed! Reason: {answer}")
+        print(f"UNKNOWN: {context.host} Scan failed! Reason: {answer}")
         sys.exit(3)
 
     uuid: Optional[str] = answer.get("uuid")
     if not uuid:
-        print(f"UNKNOWN: Failed to retrieve scan UUID for {host}.")
+        print(f"UNKNOWN: Failed to retrieve scan UUID for {context.host}.")
         sys.exit(3)
 
     try:
         response_scan = requests.get(
-            f"{SCAN_RESULT_URL}/{uuid}", proxies=proxies, timeout=10
+            f"{SCAN_RESULT_URL}/{uuid}", proxies=request_info.proxies, timeout=10
         ).json()
     except Exception as e:
-        print(f"UNKNOWN: Could not retrieve scan results for {host}: {e}")
+        print(f"UNKNOWN: Could not retrieve scan results for {context.host}: {e}")
         sys.exit(3)
 
-    return headers, data, response_scan, uuid
+    return ScanResult(response=response_scan, uuid=uuid)
 
 
-def check_vulnerabilities(
-    proxy: Optional[str],
-    rescan: bool,
-    headers: Dict[str, str],
-    data: Dict[str, str],
-    response_scan: Dict[str, Any],
-    uuid: str,
-) -> None:
+def check_vulnerabilities(context: ScanContext, scan_result: ScanResult) -> None:
     """Check the Nextcloud instance for known vulnerabilities and print the result."""
-    proxies = {"http": proxy, "https": proxy} if proxy else None
-    uuid_url = f"{SCAN_RESULT_URL}/{uuid}"
 
-    if rescan:
-        LOGGER.debug("Triggering rescan for %s", uuid)
+    request_info = ScanRequestInfo(
+        data={"url": context.host},
+        proxies={"http": context.proxy, "https": context.proxy} if context.proxy else None
+    )
+
+    uuid_url = f"{SCAN_RESULT_URL}/{scan_result.uuid}"
+    response_scan = scan_result.response
+
+    if context.rescan:
+        LOGGER.debug("Triggering rescan for %s", scan_result.uuid)
         try:
-            requests.post(SCAN_REQUEUE_URL, headers=headers, data=data, proxies=proxies, timeout=10)
-            response_scan = requests.get(uuid_url, proxies=proxies, timeout=10).json()
+            requests.post(
+                SCAN_REQUEUE_URL,
+                headers=request_info.headers,
+                data=request_info.data,
+                proxies=request_info.proxies,
+                timeout=10
+            )
+            response_scan = requests.get(uuid_url, proxies=request_info.proxies, timeout=10).json()
         except Exception as e:
-            print(f"UNKNOWN: Failed to rescan {uuid}: {e}")
+            print(f"UNKNOWN: Failed to rescan {scan_result.uuid}: {e}")
             sys.exit(3)
 
     rating: int = response_scan.get("rating", -1)
@@ -164,17 +186,24 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    context = ScanContext(
+        host=args.host,
+        proxy=args.proxy,
+        debug=args.debug,
+        rescan=args.rescan
+    )
+
     logging.basicConfig(
-        level=logging.DEBUG if args.debug else logging.INFO,
+        level=logging.DEBUG if context.debug else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    LOGGER.debug("Starting scan for host: %s", args.host)
+    LOGGER.debug("Starting scan for host: %s", context.host)
 
-    check_if_ip_or_host(args.host)
-    headers, data, response_scan, uuid = send_scan_request(args.host, args.proxy)
-    check_vulnerabilities(args.proxy, args.rescan, headers, data, response_scan, uuid)
+    check_if_ip_or_host(context.host)
+    scan_result = send_scan_request(context)
+    check_vulnerabilities(context, scan_result)
 
 
 if __name__ == "__main__":
