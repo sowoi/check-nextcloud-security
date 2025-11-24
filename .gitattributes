@@ -4,3 +4,4 @@ tests/ export-ignore
 .gitignore export-ignore
 CONTRIBUTING.md export-ignore
 noxfile.py export-ignore
+mypy.ini export-ignore
