@@ -1,4 +1,4 @@
-name: Run ruff check
+name: ruff check
 
 on:
   push:
