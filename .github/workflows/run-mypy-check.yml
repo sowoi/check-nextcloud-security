@@ -23,4 +23,4 @@ jobs:
         run: uv sync --group test
 
       - name: Run tests
-        run: uv run --group test mypy -config-file mypy.ini
+        run: uv run --group test mypy --config-file mypy.ini
