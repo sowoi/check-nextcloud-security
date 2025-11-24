@@ -3,6 +3,7 @@
 * [Features](#features)
 * [Prerequisites](#prerequisites)
 * [Installation](#installation)
+  * [Icinga2 / Nagios:](#icinga2--nagios-)
 * [CLI Usage](#cli-usage)
   * [Command](#command)
 * [Options:](#options)
@@ -23,7 +24,7 @@ This check uses Nextcloud's own security scan at scan.nextcloud.com to check if 
 
 
 # Prerequisites
-- Python3
+- Python3.10 or higher
 - Python3-requests module
 
 # Installation
@@ -34,7 +35,7 @@ pip install -r requirements.txt
 ```
 
 
-Icinga2 / Nagios: 
+## Icinga2 / Nagios: 
 - Put the Python script to your plugin folder. Usually /usr/lib/nagios/plugins/
 - Create a new command custom command:
 
@@ -110,7 +111,7 @@ python3 check_nextcloud_security.py -H nexcloud.example.com
 CRITICAL: This server version is end of life and has no security fixes anymore. 
  Nextcloud 24.0.11.1  on  nextcloud.example.com , rating is  F , last scanned:  2023-05-30 07:48:58.000000
 
-python3 check_nextcloud_security.py -H nextlcoud.example.com
+python3 check_nextcloud_security.py -H nextcloud.example.com
 OK: Server is up to date. No known vulnerabilities 
  Nextcloud 26.0.2.1  on  nextcloud.example.com , rating is  A+ , last scanned:  2023-05-29 08:50:58.000000
  
@@ -123,3 +124,6 @@ Licensed under the terms of GNU General Public License v3.0. See LICENSE file.
 
 # More
 [Dev-Site okxo.de](https://okxo.de/regularly-check-your-nextcloud-instance-for-vulnerabilities)
+
+![Linting](https://github.com/sowoi/check-nextcloud-security//actions/workflows/run-ruff-check.yml/badge.svg)
+![Unittests](https://github.com/sowoi/check-nextcloud-security//actions/workflows/run-tests.yml/badge.svg)
