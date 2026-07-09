@@ -1,0 +1,54 @@
+// Managed by Ansible - role: nextcloud_check_docker
+// Do not edit by hand, changes will be overwritten.
+//
+// Runs the check via `docker run --rm <image> ...`. Instance-specific
+// values (host, proxy, rescan, debug, retries, backoff-factor) are
+// intentionally NOT set here - they are set as custom variables on the
+// Service object(s) using this CheckCommand, so the same command
+// definition can be reused for multiple Nextcloud instances. Arguments
+// whose macro resolves to null are omitted automatically by Icinga2.
+object CheckCommand "{{ nextcloud_check_command_name }}" {
+    import "plugin-check-command"
+    command = [ "{{ nextcloud_check_docker_binary }}" ]
+
+    arguments += {
+        "run" = {
+            order = -5
+            value = "run"
+        }
+        "--rm" = {
+            order = -4
+            value = "--rm"
+        }
+        "image" = {
+            order = -3
+            skip_key = true
+            value = "{{ nextcloud_check_docker_image_name }}:{{ nextcloud_check_docker_image_tag }}"
+        }
+        "--host" = {
+            description = "Nextcloud hostname or URL"
+            required = true
+            value = "$nextcloud_host$"
+        }
+        "--proxy" = {
+            description = "HTTP/HTTPS proxy (optional)"
+            value = "$nextcloud_proxy$"
+        }
+        "--rescan" = {
+            description = "Trigger a new scan on each check (optional)"
+            set_if = "$nextcloud_rescan$"
+        }
+        "--debug" = {
+            description = "Enable debugging output (optional)"
+            set_if = "$nextcloud_debug$"
+        }
+        "--retries" = {
+            description = "Retry attempts for transient network errors"
+            value = "$nextcloud_retries$"
+        }
+        "--backoff-factor" = {
+            description = "Exponential backoff factor (seconds) between retries"
+            value = "$nextcloud_backoff_factor$"
+        }
+    }
+}

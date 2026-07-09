@@ -1,0 +1,48 @@
+---
+# Source repository cloned to build the Docker image from.
+nextcloud_check_repo_url: "https://github.com/sowoi/check-nextcloud-security.git"
+nextcloud_check_repo_version: "main"
+nextcloud_check_clone_dest: /opt/check-nextcloud-security/src
+
+# Docker image build settings.
+nextcloud_check_docker_image_name: check-nextcloud-security
+nextcloud_check_docker_image_tag: latest
+nextcloud_check_force_rebuild: false
+
+# User account running the Icinga2 daemon. It is added to the "docker"
+# group so it can talk to the Docker socket without root privileges.
+nextcloud_check_icinga_user: icinga
+
+# Icinga2 configuration.
+nextcloud_check_icinga_conf_dir: /etc/icinga2/conf.d
+nextcloud_check_command_name: check_nextcloud_security
+nextcloud_check_service_name: "Nextcloud Security Scan"
+nextcloud_check_interval: 24h
+# Name of the existing Icinga2 Host object the Service is attached to.
+# Defaults to the Ansible inventory_hostname.
+nextcloud_check_icinga_host_name: "{{ inventory_hostname }}"
+
+# Marker files used to detect (and refuse) conflicting native/Docker
+# deployments on the same host - both roles must not manage the same
+# CheckCommand object.
+nextcloud_check_native_marker: /etc/icinga2/conf.d/.check_nextcloud_security_native
+nextcloud_check_docker_marker: /etc/icinga2/conf.d/.check_nextcloud_security_docker
+
+# Plugin options - map 1:1 to the CNS_* environment variables / CLI flags
+# documented in the project README.
+nextcloud_check_host: "{{ inventory_hostname }}"
+nextcloud_check_proxy: ""
+nextcloud_check_rescan: false
+nextcloud_check_debug: false
+nextcloud_check_retries: 2
+nextcloud_check_backoff_factor: 0.5
+
+# Set to false to skip `icinga2 daemon -C` validation (not recommended).
+nextcloud_check_validate_config: true
+
+# Set to false to skip restarting/reloading icinga2 (e.g. when applying this
+# role in a larger batch and reloading separately afterwards).
+nextcloud_check_manage_icinga_service: true
+
+# Path to the Docker CLI/socket used by the CheckCommand.
+nextcloud_check_docker_binary: /usr/bin/docker

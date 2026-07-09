@@ -1,6 +1,7 @@
 from check_nextcloud_security import send_scan_request, ScanContext, ScanResult
 
 import pytest
+import requests
 from unittest.mock import MagicMock
 
 def test_send_scan_request_success(mocker) -> None:
@@ -84,6 +85,31 @@ def test_send_scan_request_critical(mocker) -> None:
     mock_scan_get.assert_called_once()
 
 
+def test_send_scan_request_uses_proxy_for_both_calls(mocker) -> None:
+    """
+    Tests that when a proxy is configured on the ScanContext, it is forwarded
+    to both the POST (queue) and GET (result) requests.
+    """
+    context = ScanContext(host="nextcloud.nextcloud.com", proxy="http://proxy.example.com:8080")
+
+    mock_scan_post = mocker.patch("check_nextcloud_security.requests.post")
+    mock_scan_post.return_value.raise_for_status.return_value = None
+    mock_scan_post.return_value.json.return_value = {"uuid": "123-uid"}
+
+    mock_scan_get = mocker.patch("check_nextcloud_security.requests.get")
+    mock_scan_get.return_value.json.return_value = {"rating": 5, "vulnerabilities": []}
+
+    expected_proxies = {
+        "http": "http://proxy.example.com:8080",
+        "https": "http://proxy.example.com:8080",
+    }
+
+    send_scan_request(context)
+
+    assert mock_scan_post.call_args.kwargs["proxies"] == expected_proxies
+    assert mock_scan_get.call_args.kwargs["proxies"] == expected_proxies
+
+
 def test_send_scan_request_post_failure(mocker):
     """
     Tests that send_scan_request exits with code 3 if the initial POST request fails
@@ -91,10 +117,36 @@ def test_send_scan_request_post_failure(mocker):
     """
     context = ScanContext(host="nextcloud.nextlcoud.com")
 
-    mocker.patch("check_nextcloud_security.requests.post", side_effect=Exception("Network error"))
+    mocker.patch(
+        "check_nextcloud_security.requests.post",
+        side_effect=requests.exceptions.ConnectionError("Network error"),
+    )
 
     with pytest.raises(SystemExit) as e:
         send_scan_request(context) # Aufruf mit Context
+
+    assert e.value.code == 3
+
+
+def test_send_scan_request_result_fetch_failure(mocker):
+    """
+    Tests that send_scan_request exits with code 3 if the initial POST request
+    succeeds (returning a uuid) but the subsequent GET request to fetch the
+    scan result fails (e.g., due to a network error or timeout).
+    """
+    context = ScanContext(host="nextcloud.nextlcoud.com")
+
+    mock_post = mocker.patch("check_nextcloud_security.requests.post")
+    mock_post.return_value.json.return_value = {"uuid": "123-uid"}
+    mock_post.return_value.raise_for_status.return_value = None
+
+    mocker.patch(
+        "check_nextcloud_security.requests.get",
+        side_effect=requests.exceptions.Timeout("Request timed out"),
+    )
+
+    with pytest.raises(SystemExit) as e:
+        send_scan_request(context)
 
     assert e.value.code == 3
 

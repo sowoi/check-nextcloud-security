@@ -1,4 +1,5 @@
 import pytest
+import requests
 from check_nextcloud_security import check_vulnerabilities, ScanContext, ScanResult
 
 
@@ -98,7 +99,10 @@ def test_check_vulnerabilities_rescan_failure(mocker, capsys):
     initial_response.setdefault("scannedAt", {"date": "Unknown"})
     initial_result = ScanResult(response=initial_response, uuid="uuid-fail")
 
-    mocker.patch("check_nextcloud_security.requests.post", side_effect=Exception("network error"))
+    mocker.patch(
+        "check_nextcloud_security.requests.post",
+        side_effect=requests.exceptions.ConnectionError("network error"),
+    )
 
     with pytest.raises(SystemExit) as e:
         check_vulnerabilities(context, initial_result)

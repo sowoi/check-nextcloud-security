@@ -1,0 +1,13 @@
+[Unit]
+Description=Check Nextcloud instance for known vulnerabilities (scan.nextcloud.com)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Copy check-nextcloud-security.env.example to /etc/check-nextcloud-security/env
+# and set at least CNS_HOST there.
+EnvironmentFile=/etc/check-nextcloud-security/env
+# Adjust the path if you installed the plugin elsewhere (see README.md).
+ExecStart=/usr/local/bin/check-nextcloud-security
+DynamicUser=yes

@@ -1,0 +1,84 @@
+---
+- name: Fail if a conflicting Docker deployment is present on this host
+  ansible.builtin.stat:
+    path: "{{ nextcloud_check_docker_marker }}"
+  register: __nextcloud_check_docker_marker_stat
+
+- name: Assert no Docker-based deployment already manages this host
+  ansible.builtin.fail:
+    msg: >-
+      A Docker-based check-nextcloud-security deployment already manages
+      this host ({{ nextcloud_check_docker_marker }} exists). Remove it
+      first (or run the nextcloud_check_docker role's cleanup) before
+      applying the native role, to avoid duplicate Icinga2 objects.
+  when: __nextcloud_check_docker_marker_stat.stat.exists
+
+- name: Install OS prerequisites
+  ansible.builtin.package:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - git
+    state: present
+
+- name: Create virtualenv directory
+  ansible.builtin.file:
+    path: "{{ nextcloud_check_venv_path }}"
+    state: directory
+    mode: "0755"
+
+- name: Install check-nextcloud-security into the virtualenv
+  ansible.builtin.pip:
+    name: "git+{{ nextcloud_check_repo_url }}@{{ nextcloud_check_repo_version }}"
+    virtualenv: "{{ nextcloud_check_venv_path }}"
+    virtualenv_command: "{{ nextcloud_check_venv_python }} -m venv"
+    state: forcereinstall
+
+- name: Ensure the Nagios/Icinga2 plugin directory exists
+  ansible.builtin.file:
+    path: "{{ nextcloud_check_plugin_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Symlink check-nextcloud-security into the plugin directory
+  ansible.builtin.file:
+    src: "{{ nextcloud_check_venv_path }}/bin/check-nextcloud-security"
+    dest: "{{ nextcloud_check_plugin_dir }}/check-nextcloud-security"
+    state: link
+    force: true
+
+- name: Ensure the Icinga2 conf.d directory exists
+  ansible.builtin.file:
+    path: "{{ nextcloud_check_icinga_conf_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Template the Icinga2 CheckCommand object
+  ansible.builtin.template:
+    src: checkcommand.conf.j2
+    dest: "{{ nextcloud_check_icinga_conf_dir }}/{{ nextcloud_check_command_name }}.conf"
+    mode: "0644"
+  notify: Reload icinga2
+
+- name: Template the Icinga2 Service object
+  ansible.builtin.template:
+    src: service.conf.j2
+    dest: "{{ nextcloud_check_icinga_conf_dir }}/{{ nextcloud_check_command_name }}_service.conf"
+    mode: "0644"
+  notify: Reload icinga2
+
+- name: Create the native-deployment marker file
+  ansible.builtin.file:
+    path: "{{ nextcloud_check_native_marker }}"
+    state: touch
+    mode: "0644"
+    modification_time: preserve
+    access_time: preserve
+
+- name: Validate the Icinga2 configuration
+  ansible.builtin.command: icinga2 daemon -C
+  register: __nextcloud_check_icinga_validate
+  changed_when: false
+  failed_when: __nextcloud_check_icinga_validate.rc != 0
+  when: nextcloud_check_validate_config | bool

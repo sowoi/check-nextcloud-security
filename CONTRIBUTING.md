@@ -1,7 +1,7 @@
 <!-- TOC -->
 * [CONTRIBUTING](#contributing)
   * [Guidelines](#guidelines)
-  * [🛠️ Local Setup](#-local-setup)
+  * [Local setup](#local-setup)
     * [1. Install `uv`](#1-install-uv)
   * [Install Dependencies](#install-dependencies)
   * [Running Tests](#running-tests)
@@ -22,7 +22,7 @@ We welcome and appreciate all contributions to this project! Before submitting a
 
 ---
 
-## 🛠️ Local Setup
+## Local setup
 
 We recommend using **`uv`** for managing dependencies and running development tasks.
 

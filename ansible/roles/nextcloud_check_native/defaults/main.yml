@@ -1,0 +1,43 @@
+---
+# Source repository used to install the plugin with pip.
+nextcloud_check_repo_url: "https://github.com/sowoi/check-nextcloud-security.git"
+nextcloud_check_repo_version: "main"
+
+# Where the dedicated virtualenv is created. The plugin and its dependencies
+# are installed here, isolated from system Python packages.
+nextcloud_check_venv_path: /opt/check-nextcloud-security/venv
+nextcloud_check_venv_python: /usr/bin/python3
+
+# Nagios/Icinga2 plugin directory. The venv's console-script is symlinked here.
+nextcloud_check_plugin_dir: /usr/lib/nagios/plugins
+
+# Icinga2 configuration.
+nextcloud_check_icinga_conf_dir: /etc/icinga2/conf.d
+nextcloud_check_command_name: check_nextcloud_security
+nextcloud_check_service_name: "Nextcloud Security Scan"
+nextcloud_check_interval: 24h
+# Name of the existing Icinga2 Host object the Service is attached to.
+# Defaults to the Ansible inventory_hostname.
+nextcloud_check_icinga_host_name: "{{ inventory_hostname }}"
+
+# Marker files used to detect (and refuse) conflicting native/Docker
+# deployments on the same host - both roles must not manage the same
+# CheckCommand object.
+nextcloud_check_native_marker: /etc/icinga2/conf.d/.check_nextcloud_security_native
+nextcloud_check_docker_marker: /etc/icinga2/conf.d/.check_nextcloud_security_docker
+
+# Plugin options - map 1:1 to the CNS_* environment variables / CLI flags
+# documented in the project README.
+nextcloud_check_host: "{{ inventory_hostname }}"
+nextcloud_check_proxy: ""
+nextcloud_check_rescan: false
+nextcloud_check_debug: false
+nextcloud_check_retries: 2
+nextcloud_check_backoff_factor: 0.5
+
+# Set to false to skip `icinga2 daemon -C` validation (not recommended).
+nextcloud_check_validate_config: true
+
+# Set to false to skip restarting/reloading icinga2 (e.g. when applying this
+# role in a larger batch and reloading separately afterwards).
+nextcloud_check_manage_icinga_service: true

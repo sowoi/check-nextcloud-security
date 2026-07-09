@@ -1,0 +1,12 @@
+---
+# Shared defaults applied to all hosts in the icinga_targets group.
+# Override per-host in the inventory (see inventory.example.ini) or in
+# host_vars/<hostname>.yml for anything host-specific.
+
+# nextcloud_check_host: nextcloud.example.com   # usually set per-host
+# nextcloud_check_proxy: ""
+# nextcloud_check_rescan: false
+# nextcloud_check_debug: false
+# nextcloud_check_retries: 2
+# nextcloud_check_backoff_factor: 0.5
+# nextcloud_check_interval: 24h

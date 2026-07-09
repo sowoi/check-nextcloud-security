@@ -1,0 +1,42 @@
+// Managed by Ansible - role: nextcloud_check_native
+// Do not edit by hand, changes will be overwritten.
+//
+// Instance-specific values (host, proxy, rescan, debug, retries,
+// backoff-factor) are intentionally NOT set here - they are set as custom
+// variables on the Service object(s) using this CheckCommand, so the same
+// command definition can be reused for multiple Nextcloud instances.
+// Arguments whose macro resolves to null are omitted automatically by
+// Icinga2, so unset optional vars (e.g. nextcloud_proxy) simply don't
+// produce a command-line flag.
+object CheckCommand "{{ nextcloud_check_command_name }}" {
+    import "plugin-check-command"
+    command = [ PluginDir + "/check-nextcloud-security" ]
+
+    arguments += {
+        "--host" = {
+            description = "Nextcloud hostname or URL"
+            required = true
+            value = "$nextcloud_host$"
+        }
+        "--proxy" = {
+            description = "HTTP/HTTPS proxy (optional)"
+            value = "$nextcloud_proxy$"
+        }
+        "--rescan" = {
+            description = "Trigger a new scan on each check (optional)"
+            set_if = "$nextcloud_rescan$"
+        }
+        "--debug" = {
+            description = "Enable debugging output (optional)"
+            set_if = "$nextcloud_debug$"
+        }
+        "--retries" = {
+            description = "Retry attempts for transient network errors"
+            value = "$nextcloud_retries$"
+        }
+        "--backoff-factor" = {
+            description = "Exponential backoff factor (seconds) between retries"
+            value = "$nextcloud_backoff_factor$"
+        }
+    }
+}

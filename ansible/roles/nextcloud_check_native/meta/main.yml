@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: nextcloud_check_native
+  author: sowoi
+  description: >
+    Installs check-nextcloud-security into a dedicated virtualenv and
+    configures it as an Icinga2 CheckCommand/Service.
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Debian
+      versions: [all]
+    - name: Ubuntu
+      versions: [all]
+    - name: EL
+      versions: [all]
+dependencies: []
