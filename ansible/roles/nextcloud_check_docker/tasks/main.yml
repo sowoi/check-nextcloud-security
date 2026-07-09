@@ -1,0 +1,96 @@
+---
+- name: Fail if a conflicting native deployment is present on this host
+  ansible.builtin.stat:
+    path: "{{ nextcloud_check_native_marker }}"
+  register: __nextcloud_check_native_marker_stat
+
+- name: Assert no native deployment already manages this host
+  ansible.builtin.fail:
+    msg: >-
+      A native check-nextcloud-security deployment already manages this
+      host ({{ nextcloud_check_native_marker }} exists). Remove it first
+      before applying the Docker role, to avoid duplicate Icinga2 objects.
+  when: __nextcloud_check_native_marker_stat.stat.exists
+
+- name: Verify the Docker CLI is available
+  ansible.builtin.command: "{{ nextcloud_check_docker_binary }} version"
+  register: __nextcloud_check_docker_version
+  changed_when: false
+  failed_when: false
+
+- name: Fail with guidance if Docker is not installed/usable
+  ansible.builtin.fail:
+    msg: >-
+      Docker does not appear to be installed or usable at
+      {{ nextcloud_check_docker_binary }} on this host. This role assumes
+      Docker Engine is already installed (e.g. via the official
+      get.docker.com script or your OS package manager / the
+      community.docker / geerlingguy.docker Ansible role) - install it
+      first, then re-run this playbook.
+  when: __nextcloud_check_docker_version.rc != 0
+
+- name: Ensure git is installed (needed to clone the source repository)
+  ansible.builtin.package:
+    name: git
+    state: present
+
+- name: Clone check-nextcloud-security
+  ansible.builtin.git:
+    repo: "{{ nextcloud_check_repo_url }}"
+    dest: "{{ nextcloud_check_clone_dest }}"
+    version: "{{ nextcloud_check_repo_version }}"
+    force: true
+  register: __nextcloud_check_git_clone
+
+- name: Build the check-nextcloud-security Docker image
+  community.docker.docker_image:
+    name: "{{ nextcloud_check_docker_image_name }}"
+    tag: "{{ nextcloud_check_docker_image_tag }}"
+    source: build
+    build:
+      path: "{{ nextcloud_check_clone_dest }}"
+      pull: true
+    force_source: "{{ nextcloud_check_force_rebuild or __nextcloud_check_git_clone.changed }}"
+
+- name: Add the Icinga2 service account to the docker group
+  ansible.builtin.user:
+    name: "{{ nextcloud_check_icinga_user }}"
+    groups: docker
+    append: true
+  register: __nextcloud_check_icinga_user
+  notify: Restart icinga2
+
+- name: Ensure the Icinga2 conf.d directory exists
+  ansible.builtin.file:
+    path: "{{ nextcloud_check_icinga_conf_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Template the Icinga2 CheckCommand object (Docker-based)
+  ansible.builtin.template:
+    src: checkcommand.conf.j2
+    dest: "{{ nextcloud_check_icinga_conf_dir }}/{{ nextcloud_check_command_name }}.conf"
+    mode: "0644"
+  notify: Reload icinga2
+
+- name: Template the Icinga2 Service object
+  ansible.builtin.template:
+    src: service.conf.j2
+    dest: "{{ nextcloud_check_icinga_conf_dir }}/{{ nextcloud_check_command_name }}_service.conf"
+    mode: "0644"
+  notify: Reload icinga2
+
+- name: Create the docker-deployment marker file
+  ansible.builtin.file:
+    path: "{{ nextcloud_check_docker_marker }}"
+    state: touch
+    mode: "0644"
+    modification_time: preserve
+    access_time: preserve
+
+- name: Validate the Icinga2 configuration
+  ansible.builtin.command: icinga2 daemon -C
+  register: __nextcloud_check_icinga_validate
+  changed_when: false
+  failed_when: __nextcloud_check_icinga_validate.rc != 0
+  when: nextcloud_check_validate_config | bool

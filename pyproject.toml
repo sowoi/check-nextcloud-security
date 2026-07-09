@@ -1,18 +1,25 @@
 [project]
 name = "check-nextcloud-security"
-version = "0.1.0"
+version = "0.3.0"
 description = "Check the security level of your Nextcloud instance with the Nextcloud Security API "
 authors = [{ name = "Massoud Ahmed", email = "trapez.klinge-4m@icloud.com" }, { name = "Georg Schlagholz"}]
-requires-python = "~=3.10.0"
+requires-python = ">=3.10"
 readme = "README.md"
+license = { file = "LICENSE" }
 dependencies = [
     "certifi>=2025.11.12",
     "requests>=2.32.5",
     "types-requests>=2.32.4.20250913",
 ]
 
+[project.scripts]
+check-nextcloud-security = "check_nextcloud_security:main"
+
 [tool.uv]
-package = false
+package = true
+
+[tool.hatch.build.targets.wheel]
+py-modules = ["check_nextcloud_security"]
 
 [build-system]
 requires = ["hatchling"]

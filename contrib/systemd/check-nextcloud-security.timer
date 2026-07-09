@@ -1,0 +1,12 @@
+[Unit]
+Description=Run check-nextcloud-security once a day
+
+[Timer]
+OnCalendar=daily
+# Spread runs across a random window so you don't hammer scan.nextcloud.com
+# at the same time as everyone else running this on the same schedule.
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

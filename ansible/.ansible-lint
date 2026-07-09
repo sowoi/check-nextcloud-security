@@ -1,0 +1,10 @@
+---
+# The var-naming[no-role-prefix] rule is intentionally disabled: both
+# nextcloud_check_native and nextcloud_check_docker roles deliberately share
+# the same nextcloud_check_* variable namespace (instead of role-prefixed
+# nextcloud_check_native_*/nextcloud_check_docker_* names) so a single
+# inventory/group_vars value set (host, proxy, rescan, debug, retries,
+# backoff-factor, service naming, etc.) works unmodified with either
+# playbook. See ansible/README.md's "Variable reference" section.
+skip_list:
+  - var-naming[no-role-prefix]

@@ -39,7 +39,10 @@ def test_main_calls_all_functions(mocker):
 
     mock_check_ip.assert_called_once_with("nextcloud.example.com")
     mock_send_scan.assert_called_once_with(expected_context)
-    mock_check_vuln.assert_called_once_with(expected_context, mock_scan_result)
+    mock_check_vuln.assert_called_once()
+    call_args, call_kwargs = mock_check_vuln.call_args
+    assert call_args == (expected_context, mock_scan_result)
+    assert isinstance(call_kwargs["duration_seconds"], float)
 
 
 def test_main_debug_mode_enables_debug_logging(mocker):
@@ -82,3 +85,33 @@ def test_main_exits_when_no_host(mocker):
 
     with pytest.raises(SystemExit):
         cns.main()
+
+
+def test_main_exits_when_host_is_blank(mocker, capsys):
+    """
+    Test that the main function rejects a whitespace-only '--host' value
+    with a non-zero exit code instead of attempting to scan an empty host.
+    """
+    test_args = ["prog", "-H", "   "]
+    mocker.patch.object(sys, "argv", test_args)
+
+    with pytest.raises(SystemExit) as e:
+        cns.main()
+
+    assert e.value.code != 0
+
+
+def test_main_version_flag_prints_version_and_exits(mocker, capsys):
+    """
+    Test that '--version'/'-V' prints the package version and exits with
+    code 0, without attempting to run a scan.
+    """
+    test_args = ["prog", "--version"]
+    mocker.patch.object(sys, "argv", test_args)
+
+    with pytest.raises(SystemExit) as e:
+        cns.main()
+
+    out = capsys.readouterr().out
+    assert cns.__version__ in out
+    assert e.value.code == 0

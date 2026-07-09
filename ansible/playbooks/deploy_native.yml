@@ -1,0 +1,14 @@
+---
+# Deploys check-nextcloud-security natively (pip/virtualenv) and configures
+# it as an Icinga2 CheckCommand/Service on each target host.
+#
+# Usage:
+#   ansible-galaxy install -r requirements.yml   # only needed for the docker playbook
+#   ansible-playbook -i inventory.ini playbooks/deploy_native.yml
+#
+# See ansible/README.md for variable reference and prerequisites.
+- name: Deploy check-nextcloud-security (native / pip)
+  hosts: icinga_targets
+  become: true
+  roles:
+    - role: nextcloud_check_native

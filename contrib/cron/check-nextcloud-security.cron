@@ -1,0 +1,19 @@
+# Example /etc/cron.d/check-nextcloud-security entry.
+#
+# Runs once a day at 03:00 as the "nagios" user. Adjust the user, path, and
+# schedule to match your environment. Only one scan per day is recommended -
+# see the "Rescan" section in README.md.
+#
+# Install:
+#   sudo cp check-nextcloud-security.cron /etc/cron.d/check-nextcloud-security
+#   sudo chmod 644 /etc/cron.d/check-nextcloud-security
+#
+# All options can be set via CNS_-prefixed environment variables instead of
+# command-line flags, as shown below.
+
+CNS_HOST=nextcloud.example.com
+#CNS_PROXY=http://proxy.example.com:3128
+#CNS_RETRIES=2
+#CNS_BACKOFF_FACTOR=0.5
+
+0 3 * * * nagios /usr/local/bin/check-nextcloud-security >> /var/log/check-nextcloud-security.log 2>&1

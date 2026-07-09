@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: nextcloud_check_docker
+  author: sowoi
+  description: >
+    Builds the check-nextcloud-security Docker image and configures it as
+    an Icinga2 CheckCommand/Service, running the check via `docker run`.
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Debian
+      versions: [all]
+    - name: Ubuntu
+      versions: [all]
+    - name: EL
+      versions: [all]
+dependencies: []

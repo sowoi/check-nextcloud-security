@@ -1,0 +1,20 @@
+// Managed by Ansible - role: nextcloud_check_docker
+// Do not edit by hand, changes will be overwritten.
+//
+// Please do not run the query too often, or you will be banned from
+// scan.nextcloud.com. One check every 24 hours is normally sufficient.
+object Service "{{ nextcloud_check_service_name }}" {
+    import "generic-service"
+    host_name = "{{ nextcloud_check_icinga_host_name }}"
+    check_command = "{{ nextcloud_check_command_name }}"
+    check_interval = {{ nextcloud_check_interval }}
+
+    vars.nextcloud_host = "{{ nextcloud_check_host }}"
+{% if nextcloud_check_proxy %}
+    vars.nextcloud_proxy = "{{ nextcloud_check_proxy }}"
+{% endif %}
+    vars.nextcloud_rescan = {{ nextcloud_check_rescan | lower }}
+    vars.nextcloud_debug = {{ nextcloud_check_debug | lower }}
+    vars.nextcloud_retries = {{ nextcloud_check_retries }}
+    vars.nextcloud_backoff_factor = {{ nextcloud_check_backoff_factor }}
+}
