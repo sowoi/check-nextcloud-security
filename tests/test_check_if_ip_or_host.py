@@ -1,6 +1,7 @@
+import pytest
+
 from check_nextcloud_security import check_if_ip_or_host
 
-import pytest
 
 def test_exits_on_ip(monkeypatch):
     """Should abort with exit(3) for IP address."""

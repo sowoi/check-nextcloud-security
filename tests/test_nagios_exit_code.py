@@ -1,4 +1,5 @@
 import pytest
+
 from check_nextcloud_security import NagiosExitCode, _fail
 
 

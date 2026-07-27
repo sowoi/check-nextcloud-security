@@ -9,9 +9,10 @@ import os
 import re
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, Callable, Dict, List, NoReturn, Optional, TypeVar
+from typing import Any, NoReturn, TypeVar
 
 import requests
 
@@ -51,7 +52,7 @@ class ScanContext:
     """Immutable configuration for a single scan run."""
 
     host: str
-    proxy: Optional[str] = None
+    proxy: str | None = None
     debug: bool = False
     rescan: bool = False
     retries: int = DEFAULT_RETRIES
@@ -62,24 +63,24 @@ class ScanContext:
 class ScanRequestInfo:
     """HTTP request parameters shared by all calls to the Scan API."""
 
-    headers: Dict[str, str] = field(default_factory=lambda: {
+    headers: dict[str, str] = field(default_factory=lambda: {
         "Content-type": "application/x-www-form-urlencoded",
         "X-CSRF": "true",
     })
-    data: Dict[str, str] = field(default_factory=dict)
-    proxies: Optional[Dict[str, str]] = None
+    data: dict[str, str] = field(default_factory=dict)
+    proxies: dict[str, str] | None = None
 
 
 @dataclass
 class ScanResult:
     """Result of a completed (or in-progress) scan lookup."""
 
-    response: Dict[str, Any]
+    response: dict[str, Any]
     uuid: str
 
 
 # --- Environment variable helpers ---
-def _env(name: str) -> Optional[str]:
+def _env(name: str) -> str | None:
     """Read a CNS_-prefixed environment variable (e.g. CNS_HOST)."""
     return os.environ.get(f"{ENV_PREFIX}{name}")
 
@@ -204,7 +205,7 @@ def send_scan_request(context: ScanContext) -> ScanResult:
     if isinstance(answer, str) and "Too many instances" in answer:
         _fail(f"UNKNOWN: {context.host} Scan failed! Reason: {answer}")
 
-    uuid: Optional[str] = answer.get("uuid")
+    uuid: str | None = answer.get("uuid")
     if not uuid:
         _fail(f"UNKNOWN: Failed to retrieve scan UUID for {context.host}.")
 
@@ -232,7 +233,7 @@ def send_scan_request(context: ScanContext) -> ScanResult:
 def check_vulnerabilities(
     context: ScanContext,
     scan_result: ScanResult,
-    duration_seconds: Optional[float] = None,
+    duration_seconds: float | None = None,
 ) -> None:
     """Check the Nextcloud instance for known vulnerabilities and print the result."""
 
@@ -273,10 +274,10 @@ def check_vulnerabilities(
     domain: str = response_scan.get("domain", "Unknown")
     scan_date: str = response_scan.get("scannedAt", {}).get("date", "Unknown")
 
-    rate_map: Dict[int, str] = {5: "A+", 4: "A", 3: "C", 2: "D", 1: "E", 0: "F"}
+    rate_map: dict[int, str] = {5: "A+", 4: "A", 3: "C", 2: "D", 1: "E", 0: "F"}
     rate: str = rate_map.get(rating, "Unknown")
 
-    vulnerabilities: List[Dict[str, Any]] = response_scan.get("vulnerabilities", [])
+    vulnerabilities: list[dict[str, Any]] = response_scan.get("vulnerabilities", [])
     num_vulns: int = len(vulnerabilities)
 
     msg: str = "UNKNOWN: Scan result unclear. Please verify manually."
@@ -313,9 +314,9 @@ def check_vulnerabilities(
 
 def _build_perfdata(
     rating: int,
-    rate_map: Dict[int, str],
+    rate_map: dict[int, str],
     num_vulns: int,
-    duration_seconds: Optional[float],
+    duration_seconds: float | None,
 ) -> str:
     """
     Build a Nagios/Icinga performance data string.

@@ -1,6 +1,11 @@
 import pytest
 
-from check_nextcloud_security import _build_perfdata, check_vulnerabilities, ScanContext, ScanResult
+from check_nextcloud_security import (
+    ScanContext,
+    ScanResult,
+    _build_perfdata,
+    check_vulnerabilities,
+)
 
 RATE_MAP = {5: "A+", 4: "A", 3: "C", 2: "D", 1: "E", 0: "F"}
 

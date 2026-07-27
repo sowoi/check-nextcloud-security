@@ -1,5 +1,7 @@
-import pytest
 import sys
+
+import pytest
+
 import check_nextcloud_security as cns
 from check_nextcloud_security import ScanContext, ScanResult
 
