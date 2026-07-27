@@ -4,11 +4,14 @@ Check a Nextcloud instance for known vulnerabilities using scan.nextcloud.com AP
 Authors: Massoud Ahmed, Georg Schlagholz (IT-Native GmbH)
 """
 import argparse
+import contextlib
+import io
 import logging
 import os
 import re
 import sys
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum
@@ -16,7 +19,7 @@ from typing import Any, NoReturn, TypeVar
 
 import requests
 
-__version__ = "1.1.3"
+__version__ = "1.2.0"
 
 LOGGER = logging.getLogger("check_nextcloud")
 
@@ -366,7 +369,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--host",
         required=_env("HOST") is None,
         default=_env("HOST"),
-        help=f"Nextcloud server address (hostname, not IP). Required, env: {ENV_PREFIX}HOST.",
+        help=(
+            "Nextcloud server address (hostname, not IP). Accepts a comma-separated "
+            "list (e.g. 'a.example.com,b.example.com') to check multiple hosts in "
+            f"one run. Required, env: {ENV_PREFIX}HOST."
+        ),
     )
     parser.add_argument(
         "-P",
@@ -403,16 +410,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
-    """Main entry point."""
-    parser = build_arg_parser()
-    args = parser.parse_args()
+def _parse_hosts(raw_host: str) -> list[str]:
+    """
+    Split a --host value into a list of hosts.
 
-    host = args.host.strip() if args.host else ""
-    if not host:
-        parser.error(f"--host must not be empty (or set the {ENV_PREFIX}HOST environment variable).")
+    Accepts a single hostname or a comma-separated list (e.g.
+    'a.example.com, b.example.com'). Blank entries (from stray commas or
+    surrounding whitespace) are dropped.
+    """
+    return [part.strip() for part in raw_host.split(",") if part.strip()]
 
-    context = ScanContext(
+
+def _build_context(host: str, args: argparse.Namespace) -> ScanContext:
+    """Build a ScanContext for a single host from the parsed CLI arguments."""
+    return ScanContext(
         host=host,
         proxy=args.proxy,
         debug=args.debug,
@@ -421,21 +432,113 @@ def main() -> None:
         backoff_factor=args.backoff_factor,
     )
 
+
+# Priority used to determine the overall (worst) status across multiple
+# hosts. UNKNOWN ranks below WARNING/CRITICAL so that a host we couldn't
+# reach never masks a confirmed vulnerability found on another host.
+_STATUS_PRIORITY: dict[NagiosExitCode, int] = {
+    NagiosExitCode.CRITICAL: 3,
+    NagiosExitCode.WARNING: 2,
+    NagiosExitCode.UNKNOWN: 1,
+    NagiosExitCode.OK: 0,
+}
+
+
+def _aggregate_exit_code(exit_codes: list[NagiosExitCode]) -> NagiosExitCode:
+    """Return the worst status among exit_codes (CRITICAL > WARNING > UNKNOWN > OK)."""
+    return max(exit_codes, key=lambda code: _STATUS_PRIORITY.get(code, 0))
+
+
+def _run_single_host_check(context: ScanContext) -> tuple[str, NagiosExitCode]:
+    """
+    Run the full scan-and-check flow for a single host.
+
+    Unlike calling check_if_ip_or_host/send_scan_request/check_vulnerabilities
+    directly, this captures the printed result and exit code instead of
+    terminating the process, so that a list of hosts can be processed one
+    by one without one host's failure aborting the rest.
+    """
+    buffer = io.StringIO()
+    exit_code = NagiosExitCode.UNKNOWN
+    try:
+        with contextlib.redirect_stdout(buffer):
+            check_if_ip_or_host(context.host)
+            start = time.perf_counter()
+            scan_result = send_scan_request(context)
+            duration_seconds = time.perf_counter() - start
+            check_vulnerabilities(context, scan_result, duration_seconds=duration_seconds)
+    except SystemExit as exc:
+        if isinstance(exc.code, int):
+            exit_code = NagiosExitCode(exc.code)
+    return buffer.getvalue().rstrip("\n"), exit_code
+
+
+def _summarize_multi_host_result(exit_codes: list[NagiosExitCode]) -> str:
+    """Build a one-line summary of how many hosts ended up in each status."""
+    counts = Counter(code.name for code in exit_codes)
+    breakdown = ", ".join(
+        f"{counts[name]} {name}"
+        for name in ("CRITICAL", "WARNING", "UNKNOWN", "OK")
+        if counts.get(name)
+    )
+    overall = _aggregate_exit_code(exit_codes)
+    return f"Checked {len(exit_codes)} host(s): overall {overall.name} ({breakdown})"
+
+
+def _run_multi_host_checks(hosts: list[str], args: argparse.Namespace) -> NagiosExitCode:
+    """
+    Run the scan-and-check flow for each host in turn.
+
+    Prints a summary line followed by one result block per host, and
+    returns the aggregated (worst) exit code across all hosts.
+    """
+    blocks = []
+    exit_codes = []
+    for host in hosts:
+        context = _build_context(host, args)
+        LOGGER.debug("Starting scan for host: %s", context.host)
+        message, exit_code = _run_single_host_check(context)
+        blocks.append(f"[{host}]\n{message}")
+        exit_codes.append(exit_code)
+
+    print(_summarize_multi_host_result(exit_codes))
+    print()
+    print("\n\n".join(blocks))
+
+    return _aggregate_exit_code(exit_codes)
+
+
+def main() -> None:
+    """Main entry point."""
+    parser = build_arg_parser()
+    args = parser.parse_args()
+
+    hosts = _parse_hosts(args.host or "")
+    if not hosts:
+        parser.error(f"--host must not be empty (or set the {ENV_PREFIX}HOST environment variable).")
+
     logging.basicConfig(
-        level=logging.DEBUG if context.debug else logging.INFO,
+        level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    LOGGER.debug("Starting scan for host: %s", context.host)
+    if len(hosts) == 1:
+        context = _build_context(hosts[0], args)
+        LOGGER.debug("Starting scan for host: %s", context.host)
 
-    check_if_ip_or_host(context.host)
+        check_if_ip_or_host(context.host)
 
-    start = time.perf_counter()
-    scan_result = send_scan_request(context)
-    duration_seconds = time.perf_counter() - start
+        start = time.perf_counter()
+        scan_result = send_scan_request(context)
+        duration_seconds = time.perf_counter() - start
 
-    check_vulnerabilities(context, scan_result, duration_seconds=duration_seconds)
+        check_vulnerabilities(context, scan_result, duration_seconds=duration_seconds)
+        return
+
+    LOGGER.debug("Starting scan for %d hosts: %s", len(hosts), ", ".join(hosts))
+    exit_code = _run_multi_host_checks(hosts, args)
+    sys.exit(int(exit_code))
 
 
 if __name__ == "__main__":

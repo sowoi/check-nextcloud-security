@@ -239,7 +239,7 @@ check-nextcloud-security --host <Hostname> --rescan
 # Options:
 | Option              | Description                                            | Default      | Environment variable |
 |:--------------------|:--------------------------------------------------------|:-------------|:----------------------|
-| `-H, --host`        | Nextcloud server address (hostname or URL)             | **required** | `CNS_HOST`            |
+| `-H, --host`        | Nextcloud server address(es) (hostname or URL). Accepts a comma-separated list to check multiple hosts in one run | **required** | `CNS_HOST`            |
 | `-P, --proxy`       | Proxy server address                                   | *None*       | `CNS_PROXY`           |
 | `-r, --rescan`      | Trigger a fresh scan each time (slower, more accurate) | *False*      | `CNS_RESCAN`          |
 | `-d, --debug`       | Enable verbose debugging output                        | *False*      | `CNS_DEBUG`           |
@@ -248,6 +248,24 @@ check-nextcloud-security --host <Hostname> --rescan
 | `-V, --version`     | Show the installed version and exit                    | —            | —                     |
 | `-h, --help`        | Show help and exit                                     | —            | —                     |
 
+
+# Checking multiple hosts
+`--host` (and `CNS_HOST`) accepts a comma-separated list of hostnames, e.g.:
+
+```shell
+check-nextcloud-security --host nextcloud1.example.com,nextcloud2.example.com
+```
+
+Hosts are processed one by one. The output starts with a one-line summary
+(e.g. `Checked 2 host(s): overall CRITICAL (1 CRITICAL, 1 OK)`), followed by
+one result block per host. The plugin exits with the worst status found
+across all hosts, using the usual Nagios/Icinga priority: `CRITICAL` >
+`WARNING` > `UNKNOWN` > `OK`. A single host still produces the original,
+single-block output and exit code, so existing single-host setups are
+unaffected.
+
+Whitespace around each hostname is ignored, and empty entries (e.g. from a
+trailing comma) are dropped.
 
 # Environment variables
 Every option has a `CNS_`-prefixed environment variable equivalent (see the
