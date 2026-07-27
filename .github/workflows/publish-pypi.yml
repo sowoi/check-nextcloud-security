@@ -23,7 +23,10 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Read version
+      - name: Bump patch version
+        run: uv version --bump patch
+
+      - name: Read new version
         id: version
         run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
 
@@ -31,19 +34,18 @@ jobs:
       - name: Check if tag already exists
         id: check_tag
         run: |
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "Tag v${{ steps.version.outputs.version }} existiert bereits. Überspringe Publish."
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml check_nextcloud_security.py
+          git commit -m "chore: bump version to ${{ steps.version.outputs.version }} [skip ci]"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin HEAD:main --tags
 
       - name: Build package
         if: steps.check_tag.outputs.exists != 'true'
         run: uv build
 
       - name: Publish to PyPI
-        if: steps.check_tag.outputs.exists != 'true'
         run: uv publish
 
       - name: Create Git tag and GitHub release
