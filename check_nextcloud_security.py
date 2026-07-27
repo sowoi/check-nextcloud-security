@@ -16,7 +16,7 @@ from typing import Any, NoReturn, TypeVar
 
 import requests
 
-__version__ = "1.1.0"
+__version__ = "1.1.2"
 
 LOGGER = logging.getLogger("check_nextcloud")
 
