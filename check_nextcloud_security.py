@@ -351,7 +351,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "-V",
         "--version",
         action="version",
-        version=f"%(prog)s {__version__}",
+        version=f"%(prog)s {__version__}\nhttps://github.com/sowoi/check-nextcloud-security",
     )
     parser.add_argument(
         "-d",
