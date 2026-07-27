@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   publish:
-    name: Bump version and publish
+    name: Read version and publish
     runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
@@ -19,41 +19,43 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: true
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Bump patch version
-        run: uv version --bump patch
-
-      - name: Read new version
+      - name: Read version
         id: version
         run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
 
-      - name: Sync __version__ in check_nextcloud_security.py
-        run: |
-          sed -i "s/^__version__ = \".*\"/__version__ = \"${{ steps.version.outputs.version }}\"/" check_nextcloud_security.py
 
-      - name: Commit and tag version bump
+      - name: Check if tag already exists
+        id: check_tag
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml check_nextcloud_security.py
-          git commit -m "chore: bump version to ${{ steps.version.outputs.version }} [skip ci]"
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin HEAD:main --tags
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "Tag v${{ steps.version.outputs.version }} existiert bereits. Überspringe Publish."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build package
+        if: steps.check_tag.outputs.exists != 'true'
         run: uv build
 
       - name: Publish to PyPI
+        if: steps.check_tag.outputs.exists != 'true'
         run: uv publish
 
-      - name: Create GitHub release
+      - name: Create Git tag and GitHub release
+        if: steps.check_tag.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
           gh release create "v${{ steps.version.outputs.version }}" \
             dist/* \
             --title "v${{ steps.version.outputs.version }}" \
