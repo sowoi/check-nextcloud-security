@@ -1,8 +1,10 @@
-from check_nextcloud_security import send_scan_request, ScanContext, ScanResult
+from unittest.mock import MagicMock
 
 import pytest
 import requests
-from unittest.mock import MagicMock
+
+from check_nextcloud_security import ScanContext, ScanResult, send_scan_request
+
 
 def test_send_scan_request_success(mocker) -> None:
     """

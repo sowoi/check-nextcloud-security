@@ -1,6 +1,7 @@
 import pytest
 import requests
-from check_nextcloud_security import check_vulnerabilities, ScanContext, ScanResult
+
+from check_nextcloud_security import ScanContext, ScanResult, check_vulnerabilities
 
 
 @pytest.mark.parametrize(
