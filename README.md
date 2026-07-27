@@ -90,19 +90,36 @@ If you'd rather not build locally, push the built image to your own registry
 ## Using pipx / uv / pip
 All of these expose a `check-nextcloud-security` command on your `PATH`.
 
+The package is published on [PyPI](https://pypi.org/project/check-nextcloud-security/), so a plain
+`pip install check-nextcloud-security` (or the pipx/uv equivalents below) is
+the quickest way to get started. If you need the latest unreleased changes,
+install directly from git instead by using the `git+https://...` URLs shown
+below.
+
 **Using [pipx](https://pipx.pypa.io/) (recommended for CLI tools):**
 ```shell
+pipx install check-nextcloud-security
+# or, to install the latest unreleased changes from git:
 pipx install git+https://github.com/sowoi/check-nextcloud-security.git
 ```
 
 **Using [uv](https://docs.astral.sh/uv/):**
 ```shell
+uv tool install check-nextcloud-security
+# or, to install the latest unreleased changes from git:
 uv tool install git+https://github.com/sowoi/check-nextcloud-security.git
 ```
 
 **Using pip:**
 ```shell
+pip install check-nextcloud-security
+# or, to install the latest unreleased changes from git:
 pip install git+https://github.com/sowoi/check-nextcloud-security.git
+```
+
+Upgrade an existing pip installation with:
+```shell
+pip install --upgrade check-nextcloud-security
 ```
 
 **Manual / air-gapped install:**
