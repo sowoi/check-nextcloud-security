@@ -50,5 +50,33 @@ object CheckCommand "{{ nextcloud_check_command_name }}" {
             description = "Exponential backoff factor (seconds) between retries"
             value = "$nextcloud_backoff_factor$"
         }
+        "--timeout" = {
+            description = "HTTP timeout in seconds per Scan API call"
+            value = "$nextcloud_timeout$"
+        }
+        "--warning" = {
+            description = "Rating (0-5) at or below which the check warns"
+            value = "$nextcloud_warning$"
+        }
+        "--critical" = {
+            description = "Rating (0-5) at or below which the check is critical"
+            value = "$nextcloud_critical$"
+        }
+        "--check-hardening" = {
+            description = "Also report missing hardening measures and security headers"
+            set_if = "$nextcloud_check_hardening$"
+        }
+        "--webhook-url" = {
+            description = "Optional endpoint notified when the check turns critical"
+            value = "$nextcloud_webhook_url$"
+        }
+        "--webhook-on" = {
+            description = "Lowest state that triggers the webhook"
+            value = "$nextcloud_webhook_on$"
+        }
+        "--webhook-timeout" = {
+            description = "HTTP timeout in seconds for the webhook call"
+            value = "$nextcloud_webhook_timeout$"
+        }
     }
 }

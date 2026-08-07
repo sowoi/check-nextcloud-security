@@ -10,6 +10,9 @@
   * [Command](#command)
 * [Options:](#options)
 * [Environment variables](#environment-variables)
+* [Rating thresholds](#rating-thresholds)
+* [Hardening checks](#hardening-checks)
+* [Webhook notifications](#webhook-notifications)
 * [Retries and backoff](#retries-and-backoff)
 * [Performance data](#performance-data)
 * [Rescan](#rescan)
@@ -46,6 +49,9 @@ For a permanent setup (Icinga2, systemd timer, cron, ...) see
 - Ready-to-use Docker image - no local Python setup required
 - Fully configurable via environment variables (great for Docker, systemd, cron)
 - Automatic retry with exponential backoff on transient network errors
+- Configurable rating thresholds for WARNING and CRITICAL
+- Optional hardening and security-header checks (`--check-hardening`)
+- Optional webhook notification when a check turns critical
 - Nagios/Icinga performance data (rating, vulnerability count, scan duration)
 
 
@@ -162,6 +168,21 @@ object CheckCommand "check_nextcloud_security" {
             description = "Enable debugging output (optional)"
             set_if = "$nextcloud_debug$"
         }
+
+        "--warning" = {
+            description = "Rating (0-5) at or below which the check warns (optional)"
+            value = "$nextcloud_warning$"
+        }
+
+        "--critical" = {
+            description = "Rating (0-5) at or below which the check is critical (optional)"
+            value = "$nextcloud_critical$"
+        }
+
+        "--check-hardening" = {
+            description = "Also check hardening measures and security headers (optional)"
+            set_if = "$nextcloud_check_hardening$"
+        }
     }
 }
 ```
@@ -219,6 +240,21 @@ object CheckCommand "check_nextcloud_security_docker" {
             description = "Enable debugging output (optional)"
             set_if = "$nextcloud_debug$"
         }
+
+        "--warning" = {
+            description = "Rating (0-5) at or below which the check warns (optional)"
+            value = "$nextcloud_warning$"
+        }
+
+        "--critical" = {
+            description = "Rating (0-5) at or below which the check is critical (optional)"
+            value = "$nextcloud_critical$"
+        }
+
+        "--check-hardening" = {
+            description = "Also check hardening measures and security headers (optional)"
+            set_if = "$nextcloud_check_hardening$"
+        }
     }
 }
 ```
@@ -243,6 +279,14 @@ check-nextcloud-security --host <Hostname> --rescan
 | `-P, --proxy`       | Proxy server address                                   | *None*       | `CNS_PROXY`           |
 | `-r, --rescan`      | Trigger a fresh scan each time (slower, more accurate) | *False*      | `CNS_RESCAN`          |
 | `-d, --debug`       | Enable verbose debugging output                        | *False*      | `CNS_DEBUG`           |
+| `-w, --warning`     | Rating (0-5) at or below which the check warns         | `3` (`C`)    | `CNS_WARNING`         |
+| `-c, --critical`    | Rating (0-5) at or below which the check is critical   | `1` (`E`)    | `CNS_CRITICAL`        |
+| `--check-hardening` | Also report missing hardening measures and security headers | *False* | `CNS_CHECK_HARDENING` |
+| `--timeout`         | HTTP timeout in seconds per Scan API call              | `10`         | `CNS_TIMEOUT`         |
+| `--webhook-url`     | Optional endpoint notified when the check reaches the configured state | *None* (disabled) | `CNS_WEBHOOK_URL` |
+| `--webhook-on`      | Lowest state that triggers the webhook (`critical`, `warning`, `unknown`, `always`) | `critical` | `CNS_WEBHOOK_ON` |
+| `--webhook-header`  | Extra header for the webhook request, repeatable      | *None*       | `CNS_WEBHOOK_HEADERS` |
+| `--webhook-timeout` | HTTP timeout in seconds for the webhook call          | `10`         | `CNS_WEBHOOK_TIMEOUT` |
 | `--retries`         | Retry attempts for transient network errors            | `2`          | `CNS_RETRIES`         |
 | `--backoff-factor`  | Exponential backoff factor (seconds) between retries   | `0.5`        | `CNS_BACKOFF_FACTOR`  |
 | `-V, --version`     | Show the installed version and exit                    | —            | —                     |
@@ -280,9 +324,128 @@ export CNS_PROXY=http://proxy.example.com:3128
 check-nextcloud-security
 ```
 
-Boolean variables (`CNS_DEBUG`, `CNS_RESCAN`) accept `1`, `true`, `yes`, or
+Boolean variables (`CNS_DEBUG`, `CNS_RESCAN`, `CNS_CHECK_HARDENING`) accept `1`, `true`, `yes`, or
 `on` (case-insensitive) to enable the corresponding flag; any other value
 (including unset/empty) is treated as disabled.
+
+
+# Rating thresholds
+scan.nextcloud.com grades an instance from `A+` (best) down to `F`. The plugin
+maps that grade to a numeric rating and compares it against two inclusive
+thresholds:
+
+| Rating | 5    | 4   | 3   | 2   | 1   | 0   |
+|:-------|:-----|:----|:----|:----|:----|:----|
+| Grade  | `A+` | `A` | `C` | `D` | `E` | `F` |
+
+- `-c, --critical` / `CNS_CRITICAL` (default `1`, i.e. `E`) - a rating at or
+  below this value is `CRITICAL`.
+- `-w, --warning` / `CNS_WARNING` (default `3`, i.e. `C`) - a rating at or
+  below this value is `WARNING`.
+
+Two rules always apply on top of the thresholds:
+
+- **Known vulnerabilities raise the state to at least `WARNING`**, even when
+  the overall rating still looks acceptable. The reported CVE identifiers are
+  listed in the output.
+- **An end-of-life version is always `CRITICAL`**, because it receives no
+  security fixes at all.
+
+A rating outside the documented `0-5` range yields `UNKNOWN`. `--critical`
+must not be higher than `--warning`, and both must be within `0-5`; otherwise
+the plugin refuses to run.
+
+```shell
+# Only alert once the instance is actually end-of-life
+check-nextcloud-security --host nextcloud.example.com --warning 1 --critical 0
+
+# Be strict: anything short of a fully patched A+ instance warns
+check-nextcloud-security --host nextcloud.example.com --warning 4 --critical 1
+```
+
+
+# Hardening checks
+The Scan API also reports which hardening measures and security headers an
+instance has enabled. With `--check-hardening` / `CNS_CHECK_HARDENING` these
+are evaluated as well:
+
+- Hardenings such as `bruteforceProtection`, `CSPv3`, `sameSiteCookies` and
+  `passwordConfirmation`
+- Whether HTTPS is enforced
+- Security headers such as `X-Frame-Options` and `X-Content-Type-Options`
+
+Anything reported as missing is listed in the output and exported as the
+`hardenings_missing` performance metric. A result that would otherwise be `OK`
+is raised to `WARNING`; an existing `WARNING`/`CRITICAL` is never downgraded.
+
+```shell
+check-nextcloud-security --host nextcloud.example.com --check-hardening
+```
+
+
+# Webhook notifications
+The plugin can post a JSON notification to an HTTP(S) endpoint when a check
+reaches a critical level. The feature is **optional and disabled by default** -
+it activates only once `--webhook-url` (or `CNS_WEBHOOK_URL`) is set.
+
+```shell
+check-nextcloud-security --host nextcloud.example.com \
+  --webhook-url https://hooks.example.com/nextcloud
+```
+
+- `--webhook-on` / `CNS_WEBHOOK_ON` (default `critical`) selects the lowest
+  state that triggers a notification. Each level includes the more severe ones:
+  `critical`, `warning` (WARNING + CRITICAL), `unknown` (UNKNOWN + WARNING +
+  CRITICAL) and `always`.
+- `--webhook-header` / `CNS_WEBHOOK_HEADERS` adds request headers, e.g. for
+  authentication. Repeat the flag, or separate entries with `;` in the
+  environment variable: `CNS_WEBHOOK_HEADERS="X-Auth-Token: abc; X-Env: prod"`.
+- `--webhook-timeout` / `CNS_WEBHOOK_TIMEOUT` (default `10`) limits the
+  webhook call; it is independent of the Scan API `--timeout`.
+
+Delivery reuses `--retries` / `--backoff-factor`. **A failing webhook never
+changes the check result** - the plugin appends `Webhook delivery failed` to
+its output and still exits with the state it measured, so a broken
+notification channel cannot hide (or fake) a vulnerable instance.
+
+When several hosts are checked in one run, each host that reaches the
+configured state produces its own notification. Scans that fail outright
+(unreachable host, throttled API) notify as well when `--webhook-on` is set to
+`unknown` or `always`.
+
+Example payload:
+
+```json
+{
+  "plugin": "check-nextcloud-security",
+  "plugin_version": "1.3.0",
+  "timestamp": "2026-08-07T10:12:33.123456+00:00",
+  "host": "nextcloud.example.com",
+  "status": "CRITICAL",
+  "exit_code": 2,
+  "message": "CRITICAL: This server version is end-of-life and has no security fixes.",
+  "rating": 0,
+  "rating_label": "F",
+  "product": "Nextcloud",
+  "product_version": "29.0.2.2",
+  "domain": "nextcloud.example.com",
+  "scanned_at": "2026-08-07 06:28:56.000000",
+  "eol": true,
+  "vulnerability_count": 0,
+  "vulnerabilities": [],
+  "missing_hardenings": [],
+  "scan_url": "https://scan.nextcloud.com/api/result/6a1d1bd0-...",
+  "scan_uuid": "6a1d1bd0-...",
+  "duration_seconds": 1.234
+}
+```
+
+Notifications sent for a failed scan carry only the common fields (`plugin`,
+`plugin_version`, `timestamp`, `host`, `status`, `exit_code`, `message`).
+
+> **Note:** treat the webhook as a supplement to your monitoring system, not a
+> replacement. It is fire-and-forget and is not retried beyond the configured
+> retry budget.
 
 
 # Retries and backoff
@@ -295,6 +458,9 @@ the check gives up and reports `UNKNOWN`.
 - `--backoff-factor` / `CNS_BACKOFF_FACTOR` (default `0.5`) - base delay in
   seconds; the wait before each retry doubles (`backoff_factor * 2^attempt`),
   e.g. `0.5s`, `1s`, `2s`, ...
+- `--timeout` / `CNS_TIMEOUT` (default `10`) - how long a single Scan API call
+  may take before it counts as a failure. Raise it on slow links or when
+  scanning through a proxy.
 
 Set `--retries 0` to disable retries entirely and fail fast.
 

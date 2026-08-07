@@ -73,6 +73,13 @@ your inventory (see `inventory.example.ini`) or in `group_vars`/`host_vars`.
 | `nextcloud_check_debug`                | Enable verbose debugging output                            | `false`                         |
 | `nextcloud_check_retries`              | Retry attempts for transient network errors                | `2`                             |
 | `nextcloud_check_backoff_factor`       | Exponential backoff factor (seconds) between retries       | `0.5`                           |
+| `nextcloud_check_timeout`              | HTTP timeout in seconds per Scan API call                  | `10`                            |
+| `nextcloud_check_warning`              | Rating (0-5) at or below which the check warns             | `3`                             |
+| `nextcloud_check_critical`             | Rating (0-5) at or below which the check is critical       | `1`                             |
+| `nextcloud_check_check_hardening`      | Also report missing hardening measures and headers         | `false`                         |
+| `nextcloud_check_webhook_url`          | Optional endpoint notified when a check turns critical     | `""` (disabled)                 |
+| `nextcloud_check_webhook_on`           | Lowest state that triggers the webhook                     | `critical`                      |
+| `nextcloud_check_webhook_timeout`      | HTTP timeout in seconds for the webhook call               | `10`                            |
 | `nextcloud_check_interval`             | Icinga2 `check_interval` (please keep >= `24h`)            | `24h`                           |
 | `nextcloud_check_service_name`         | Icinga2 `Service` object display name                      | `Nextcloud Security Scan`       |
 | `nextcloud_check_command_name`         | Icinga2 `CheckCommand` object name                         | `check_nextcloud_security`      |

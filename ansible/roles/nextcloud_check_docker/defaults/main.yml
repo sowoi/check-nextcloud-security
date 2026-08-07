@@ -36,6 +36,17 @@ nextcloud_check_rescan: false
 nextcloud_check_debug: false
 nextcloud_check_retries: 2
 nextcloud_check_backoff_factor: 0.5
+nextcloud_check_timeout: 10
+# Rating thresholds (0-5, where 5 == A+ and 0 == F). A rating at or below
+# the value reports the corresponding state.
+nextcloud_check_warning: 3
+nextcloud_check_critical: 1
+# Also report missing hardening measures and security headers.
+nextcloud_check_check_hardening: false
+# Optional webhook notification. Leave the URL empty to disable the feature.
+nextcloud_check_webhook_url: ""
+nextcloud_check_webhook_on: critical
+nextcloud_check_webhook_timeout: 10
 
 # Set to false to skip `icinga2 daemon -C` validation (not recommended).
 nextcloud_check_validate_config: true

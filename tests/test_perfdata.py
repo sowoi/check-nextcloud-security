@@ -56,7 +56,7 @@ def test_check_vulnerabilities_output_includes_perfdata_after_pipe(capsys):
     out = capsys.readouterr().out
     assert "|" in out
     perfdata = out.split("|", 1)[1]
-    assert "rating=5;;;0;5" in perfdata
+    assert "rating=5;@0:3;@0:1;0;5" in perfdata
     assert "vulnerabilities=0;;;0;" in perfdata
     assert "time=0.500s;;;0;" in perfdata
 
