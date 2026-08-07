@@ -6,20 +6,21 @@ Authors: Massoud Ahmed, Georg Schlagholz (IT-Native GmbH)
 import argparse
 import contextlib
 import io
+import ipaddress
 import logging
 import os
-import re
 import sys
 import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import IntEnum
 from typing import Any, NoReturn, TypeVar
 
 import requests
 
-__version__ = "1.2.0"
+__version__ = "1.4.0"
 
 LOGGER = logging.getLogger("check_nextcloud")
 
@@ -27,10 +28,26 @@ SCAN_QUEUE_URL = "https://scan.nextcloud.com/api/queue"
 SCAN_RESULT_URL = "https://scan.nextcloud.com/api/result"
 SCAN_REQUEUE_URL = "https://scan.nextcloud.com/api/requeue"
 
-REQUEST_TIMEOUT_SECONDS = 10
+DEFAULT_TIMEOUT_SECONDS = 10
+
+# Rating values returned by the Scan API, from best (5) to worst (0).
+RATE_MAP: dict[int, str] = {5: "A+", 4: "A", 3: "C", 2: "D", 1: "E", 0: "F"}
+MIN_RATING = 0
+MAX_RATING = 5
+
+# Default rating thresholds: a rating at or below these values triggers the
+# corresponding state. 3 == "C", 1 == "E".
+DEFAULT_WARNING_RATING = 3
+DEFAULT_CRITICAL_RATING = 1
 
 # Prefix for all environment variables recognized by this plugin, e.g. CNS_HOST.
 ENV_PREFIX = "CNS_"
+
+# Nagios states that may trigger the optional webhook, keyed by the value
+# accepted for --webhook-on.
+WEBHOOK_TRIGGERS: dict[str, frozenset["NagiosExitCode"]] = {}
+DEFAULT_WEBHOOK_ON = "critical"
+DEFAULT_WEBHOOK_TIMEOUT_SECONDS = 10
 
 DEFAULT_RETRIES = 2
 DEFAULT_BACKOFF_FACTOR = 0.5
@@ -50,6 +67,18 @@ class NagiosExitCode(IntEnum):
     UNKNOWN = 3
 
 
+# Which states trigger the webhook, for each --webhook-on value. Higher
+# settings include every state that is at least as severe.
+WEBHOOK_TRIGGERS.update({
+    "critical": frozenset({NagiosExitCode.CRITICAL}),
+    "warning": frozenset({NagiosExitCode.CRITICAL, NagiosExitCode.WARNING}),
+    "unknown": frozenset(
+        {NagiosExitCode.CRITICAL, NagiosExitCode.WARNING, NagiosExitCode.UNKNOWN}
+    ),
+    "always": frozenset(NagiosExitCode),
+})
+
+
 @dataclass(frozen=True)
 class ScanContext:
     """Immutable configuration for a single scan run."""
@@ -60,6 +89,15 @@ class ScanContext:
     rescan: bool = False
     retries: int = DEFAULT_RETRIES
     backoff_factor: float = DEFAULT_BACKOFF_FACTOR
+    timeout: int = DEFAULT_TIMEOUT_SECONDS
+    warning_rating: int = DEFAULT_WARNING_RATING
+    critical_rating: int = DEFAULT_CRITICAL_RATING
+    check_hardening: bool = False
+    webhook_url: str | None = None
+    webhook_on: str = DEFAULT_WEBHOOK_ON
+    webhook_timeout: int = DEFAULT_WEBHOOK_TIMEOUT_SECONDS
+    # Stored as a tuple of pairs so ScanContext stays hashable/frozen.
+    webhook_headers: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -72,6 +110,7 @@ class ScanRequestInfo:
     })
     data: dict[str, str] = field(default_factory=dict)
     proxies: dict[str, str] | None = None
+    timeout: int = DEFAULT_TIMEOUT_SECONDS
 
 
 @dataclass
@@ -129,6 +168,7 @@ def _build_request_info(context: ScanContext) -> ScanRequestInfo:
     return ScanRequestInfo(
         data={"url": context.host},
         proxies={"http": context.proxy, "https": context.proxy} if context.proxy else None,
+        timeout=context.timeout,
     )
 
 
@@ -164,9 +204,24 @@ def _call_with_retry(
 
 # --- Utility Functions ---
 def check_if_ip_or_host(host: str) -> None:
-    """Exit if host is an IP address (not supported by the API)."""
-    if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
-        _fail("IP addresses are not supported by the Scan API.")
+    """
+    Exit if host is an IP address (not supported by the API).
+
+    Accepts both plain IPv4/IPv6 literals and the bracketed IPv6 form
+    ('[2001:db8::1]') that may be copied from a URL.
+    """
+    candidate = host.strip()
+    if candidate.startswith("[") and candidate.endswith("]"):
+        candidate = candidate[1:-1]
+    # An IPv6 literal may carry a zone index (fe80::1%eth0), which
+    # ipaddress rejects but which is still unmistakably an address.
+    candidate = candidate.split("%", 1)[0]
+
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return
+    _fail("IP addresses are not supported by the Scan API.")
 
 
 def send_scan_request(context: ScanContext) -> ScanResult:
@@ -184,7 +239,7 @@ def send_scan_request(context: ScanContext) -> ScanResult:
             headers=request_info.headers,
             data=request_info.data,
             proxies=request_info.proxies,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=request_info.timeout,
         )
         response.raise_for_status()
         return response.json()
@@ -198,25 +253,26 @@ def send_scan_request(context: ScanContext) -> ScanResult:
         )
     except REQUEST_ERRORS as exc:
         LOGGER.debug("Scan request failed for %s: %s", context.host, exc, exc_info=True)
-        _fail(
+        _notify_and_fail(
+            context,
             f"UNKNOWN: {context.host} Scan failed! Either no Nextcloud/ownCloud found "
-            f"or too many scans queued: {exc}"
+            f"or too many scans queued: {exc}",
         )
 
     LOGGER.debug("Response from scan.nextcloud.com: %s", answer)
 
     if isinstance(answer, str) and "Too many instances" in answer:
-        _fail(f"UNKNOWN: {context.host} Scan failed! Reason: {answer}")
+        _notify_and_fail(context, f"UNKNOWN: {context.host} Scan failed! Reason: {answer}")
 
     uuid: str | None = answer.get("uuid")
     if not uuid:
-        _fail(f"UNKNOWN: Failed to retrieve scan UUID for {context.host}.")
+        _notify_and_fail(context, f"UNKNOWN: Failed to retrieve scan UUID for {context.host}.")
 
     def _fetch_result() -> Any:
         return requests.get(
             f"{SCAN_RESULT_URL}/{uuid}",
             proxies=request_info.proxies,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=request_info.timeout,
         ).json()
 
     try:
@@ -228,7 +284,9 @@ def send_scan_request(context: ScanContext) -> ScanResult:
         )
     except REQUEST_ERRORS as exc:
         LOGGER.debug("Fetching scan result failed for %s: %s", context.host, exc, exc_info=True)
-        _fail(f"UNKNOWN: Could not retrieve scan results for {context.host}: {exc}")
+        _notify_and_fail(
+            context, f"UNKNOWN: Could not retrieve scan results for {context.host}: {exc}"
+        )
 
     return ScanResult(response=response_scan, uuid=uuid)
 
@@ -254,10 +312,10 @@ def check_vulnerabilities(
                 headers=request_info.headers,
                 data=request_info.data,
                 proxies=request_info.proxies,
-                timeout=REQUEST_TIMEOUT_SECONDS,
+                timeout=request_info.timeout,
             )
             return requests.get(
-                uuid_url, proxies=request_info.proxies, timeout=REQUEST_TIMEOUT_SECONDS
+                uuid_url, proxies=request_info.proxies, timeout=request_info.timeout
             ).json()
 
         try:
@@ -269,50 +327,288 @@ def check_vulnerabilities(
             )
         except REQUEST_ERRORS as exc:
             LOGGER.debug("Rescan failed for %s: %s", scan_result.uuid, exc, exc_info=True)
-            _fail(f"UNKNOWN: Failed to rescan {scan_result.uuid}: {exc}")
+            _notify_and_fail(context, f"UNKNOWN: Failed to rescan {scan_result.uuid}: {exc}")
 
     rating: int = response_scan.get("rating", -1)
     product: str = response_scan.get("product", "Unknown")
     version: str = response_scan.get("version", "Unknown")
     domain: str = response_scan.get("domain", "Unknown")
     scan_date: str = response_scan.get("scannedAt", {}).get("date", "Unknown")
-
-    rate_map: dict[int, str] = {5: "A+", 4: "A", 3: "C", 2: "D", 1: "E", 0: "F"}
-    rate: str = rate_map.get(rating, "Unknown")
+    rate: str = RATE_MAP.get(rating, "Unknown")
 
     vulnerabilities: list[dict[str, Any]] = response_scan.get("vulnerabilities", [])
     num_vulns: int = len(vulnerabilities)
 
-    msg: str = "UNKNOWN: Scan result unclear. Please verify manually."
-    exit_code: NagiosExitCode = NagiosExitCode.UNKNOWN
+    msg, exit_code = _evaluate_rating(context, response_scan, rating, num_vulns)
 
-    if rating in {5, 4} and num_vulns == 0:
-        msg = (
-            "OK: Server is up to date. No known vulnerabilities."
-            if rating == 5
-            else "OK: Update available, but no known vulnerabilities."
-        )
-        exit_code = NagiosExitCode.OK
+    missing_hardenings = _collect_missing_hardenings(response_scan)
+    detail_lines = [f"{product} {version} on {domain}, rating: {rate}, last scanned: {scan_date}"]
 
-    elif num_vulns > 0:
-        severity_map = {1: "high", 2: "medium", 3: "low"}
-        severity = severity_map.get(rating, "unknown")
+    if num_vulns:
+        detail_lines.append(f"Known vulnerabilities: {_format_vulnerabilities(vulnerabilities)}")
 
-        if rating <= 1:
-            msg = f"CRITICAL: Found {num_vulns} vulnerabilities (at least one {severity})."
-            exit_code = NagiosExitCode.CRITICAL
-        elif rating <= 3:
-            msg = f"WARNING: Found {num_vulns} vulnerabilities (at least one {severity})."
-            exit_code = NagiosExitCode.WARNING
-    elif rating == 0:
-        msg = "CRITICAL: This server version is end-of-life and has no security fixes."
-        exit_code = NagiosExitCode.CRITICAL
+    if context.check_hardening:
+        if missing_hardenings:
+            detail_lines.append(f"Missing hardening: {', '.join(missing_hardenings)}")
+            if exit_code is NagiosExitCode.OK:
+                msg = (
+                    f"WARNING: {len(missing_hardenings)} hardening measure(s) missing, "
+                    "but no known vulnerabilities."
+                )
+                exit_code = NagiosExitCode.WARNING
+        else:
+            detail_lines.append("Hardening: all checked measures in place")
 
-    _fail(
-        f"{msg}\n{product} {version} on {domain}, rating: {rate}, last scanned: {scan_date} "
-        f"| {_build_perfdata(rating, rate_map, num_vulns, duration_seconds)}",
-        exit_code,
+    perfdata = _build_perfdata(
+        rating,
+        RATE_MAP,
+        num_vulns,
+        duration_seconds,
+        context=context,
+        missing_hardenings=len(missing_hardenings) if context.check_hardening else None,
     )
+
+    if _webhook_should_fire(context, exit_code):
+        payload = _build_webhook_payload(
+            context,
+            scan_result=scan_result,
+            response_scan=response_scan,
+            message=msg,
+            exit_code=exit_code,
+            rating=rating,
+            rate=rate,
+            vulnerabilities=vulnerabilities,
+            missing_hardenings=missing_hardenings,
+            duration_seconds=duration_seconds,
+        )
+        if not _send_webhook(context, payload):
+            detail_lines.append("Webhook delivery failed (see debug log)")
+
+    _fail(f"{msg}\n" + "\n".join(detail_lines) + f" | {perfdata}", exit_code)
+
+
+def _webhook_should_fire(context: ScanContext, exit_code: NagiosExitCode) -> bool:
+    """Decide whether the configured webhook applies to this result."""
+    if not context.webhook_url:
+        return False
+    return exit_code in WEBHOOK_TRIGGERS.get(context.webhook_on, frozenset())
+
+
+def _build_base_payload(
+    context: ScanContext, message: str, exit_code: NagiosExitCode
+) -> dict[str, Any]:
+    """Build the fields every webhook payload carries, regardless of outcome."""
+    return {
+        "plugin": "check-nextcloud-security",
+        "plugin_version": __version__,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "host": context.host,
+        "status": exit_code.name,
+        "exit_code": int(exit_code),
+        "message": message,
+    }
+
+
+def _build_webhook_payload(
+    context: ScanContext,
+    *,
+    scan_result: ScanResult,
+    response_scan: dict[str, Any],
+    message: str,
+    exit_code: NagiosExitCode,
+    rating: int,
+    rate: str,
+    vulnerabilities: list[dict[str, Any]],
+    missing_hardenings: list[str],
+    duration_seconds: float | None,
+) -> dict[str, Any]:
+    """
+    Build the JSON document posted to the webhook.
+
+    The payload is intentionally flat and self-describing so it can be
+    consumed by generic receivers (alertmanager bridges, chat bots, ticket
+    systems) without needing to parse the plugin's human-readable output.
+    """
+    return {
+        **_build_base_payload(context, message, exit_code),
+        "rating": rating,
+        "rating_label": rate,
+        "product": response_scan.get("product"),
+        "product_version": response_scan.get("version"),
+        "domain": response_scan.get("domain"),
+        "scanned_at": response_scan.get("scannedAt", {}).get("date"),
+        "eol": bool(response_scan.get("EOL")) or rating == MIN_RATING,
+        "vulnerability_count": len(vulnerabilities),
+        "vulnerabilities": [
+            entry.get("id") for entry in vulnerabilities if isinstance(entry, dict)
+        ],
+        "missing_hardenings": missing_hardenings if context.check_hardening else [],
+        "scan_url": f"{SCAN_RESULT_URL}/{scan_result.uuid}",
+        "scan_uuid": scan_result.uuid,
+        "duration_seconds": round(duration_seconds, 3) if duration_seconds is not None else None,
+    }
+
+
+def _send_webhook(context: ScanContext, payload: dict[str, Any]) -> bool:
+    """
+    POST the payload to the configured webhook URL.
+
+    Delivery is best-effort: a failing webhook is logged but never changes the
+    check's own state, because the monitoring result must stay truthful about
+    the Nextcloud instance rather than about the notification channel.
+    """
+    url = context.webhook_url
+    if not url:
+        return True
+
+    headers = {"Content-Type": "application/json"}
+    headers.update(dict(context.webhook_headers))
+    proxies = _build_request_info(context).proxies
+
+    LOGGER.debug("Posting %s webhook for %s to %s", payload["status"], context.host, url)
+
+    def _post() -> None:
+        response = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            proxies=proxies,
+            timeout=context.webhook_timeout,
+        )
+        response.raise_for_status()
+
+    try:
+        _call_with_retry(
+            _post,
+            retries=context.retries,
+            backoff_factor=context.backoff_factor,
+            description=f"Webhook notification for {context.host}",
+        )
+    except REQUEST_ERRORS as exc:
+        LOGGER.warning("Webhook notification for %s failed: %s", context.host, exc)
+        LOGGER.debug("Webhook failure detail", exc_info=True)
+        return False
+
+    LOGGER.debug("Webhook notification for %s delivered", context.host)
+    return True
+
+
+def _notify_and_fail(
+    context: ScanContext,
+    message: str,
+    exit_code: NagiosExitCode = NagiosExitCode.UNKNOWN,
+) -> NoReturn:
+    """
+    Fire the webhook (if configured for this state) and then terminate.
+
+    Used for aborts that happen before a scan result exists, so that an
+    unreachable instance can raise an alert just like a vulnerable one.
+    """
+    if _webhook_should_fire(context, exit_code):
+        payload = _build_base_payload(context, message, exit_code)
+        if not _send_webhook(context, payload):
+            message = f"{message}\nWebhook delivery failed (see debug log)"
+    _fail(message, exit_code)
+
+
+def _evaluate_rating(
+    context: ScanContext,
+    response_scan: dict[str, Any],
+    rating: int,
+    num_vulns: int,
+) -> tuple[str, NagiosExitCode]:
+    """
+    Map a scan rating and vulnerability count onto a Nagios state.
+
+    The rating thresholds (context.warning_rating / context.critical_rating)
+    are inclusive: a rating at or below the threshold triggers that state.
+    Known vulnerabilities always raise the state to at least WARNING, even
+    when the rating itself still looks acceptable.
+    """
+    if rating not in RATE_MAP:
+        return "UNKNOWN: Scan result unclear. Please verify manually.", NagiosExitCode.UNKNOWN
+
+    rate = RATE_MAP[rating]
+    is_eol = bool(response_scan.get("EOL")) or rating == MIN_RATING
+
+    if is_eol:
+        return (
+            "CRITICAL: This server version is end-of-life and has no security fixes.",
+            NagiosExitCode.CRITICAL,
+        )
+
+    if rating <= context.critical_rating:
+        if num_vulns:
+            return (
+                f"CRITICAL: Found {num_vulns} vulnerabilities (rating {rate}).",
+                NagiosExitCode.CRITICAL,
+            )
+        return (
+            (
+                f"CRITICAL: Rating {rate} is at or below the critical threshold "
+                f"{RATE_MAP[context.critical_rating]}."
+            ),
+            NagiosExitCode.CRITICAL,
+        )
+
+    if num_vulns:
+        return (
+            f"WARNING: Found {num_vulns} vulnerabilities (rating {rate}).",
+            NagiosExitCode.WARNING,
+        )
+
+    if rating <= context.warning_rating:
+        return (
+            (
+                f"WARNING: Rating {rate} is at or below the warning threshold "
+                f"{RATE_MAP[context.warning_rating]}, but no known vulnerabilities."
+            ),
+            NagiosExitCode.WARNING,
+        )
+
+    if rating == MAX_RATING:
+        return "OK: Server is up to date. No known vulnerabilities.", NagiosExitCode.OK
+    return "OK: Update available, but no known vulnerabilities.", NagiosExitCode.OK
+
+
+def _format_vulnerabilities(vulnerabilities: list[dict[str, Any]], limit: int = 5) -> str:
+    """Summarize vulnerability identifiers, truncating long lists."""
+    names = [
+        str(entry.get("id") or entry.get("cwe") or "unnamed")
+        for entry in vulnerabilities
+        if isinstance(entry, dict)
+    ]
+    shown = names[:limit]
+    remaining = len(names) - len(shown)
+    summary = ", ".join(shown) if shown else "details unavailable"
+    return f"{summary} (+{remaining} more)" if remaining > 0 else summary
+
+
+def _collect_missing_hardenings(response_scan: dict[str, Any]) -> list[str]:
+    """
+    List the hardening measures the Scan API reported as absent.
+
+    Covers the 'hardenings' block (brute-force protection, CSPv3, ...), the
+    security-related response headers under 'setup.headers', and whether
+    HTTPS is enforced.
+    """
+    missing: list[str] = []
+
+    hardenings = response_scan.get("hardenings")
+    if isinstance(hardenings, dict):
+        missing.extend(name for name, enabled in sorted(hardenings.items()) if not enabled)
+
+    setup = response_scan.get("setup")
+    if isinstance(setup, dict):
+        https = setup.get("https")
+        if isinstance(https, dict) and not https.get("enforced", True):
+            missing.append("httpsEnforced")
+
+        headers = setup.get("headers")
+        if isinstance(headers, dict):
+            missing.extend(name for name, enabled in sorted(headers.items()) if not enabled)
+
+    return missing
 
 
 def _build_perfdata(
@@ -320,20 +616,31 @@ def _build_perfdata(
     rate_map: dict[int, str],
     num_vulns: int,
     duration_seconds: float | None,
+    context: ScanContext | None = None,
+    missing_hardenings: int | None = None,
 ) -> str:
     """
     Build a Nagios/Icinga performance data string.
 
     Format reference: 'label'=value[UOM];[warn];[crit];[min];[max]
     See https://nagios-plugins.org/doc/guidelines.html#AEN200
+
+    The rating metric carries the configured warning/critical thresholds so
+    that graphing frontends can render them alongside the measured value.
     """
     rating_value = str(rating) if rating in rate_map else "U"
+    # Nagios range syntax: '@start:end' means "alert when inside the range",
+    # which matches our inclusive at-or-below-threshold semantics.
+    warn = f"@{MIN_RATING}:{context.warning_rating}" if context else ""
+    crit = f"@{MIN_RATING}:{context.critical_rating}" if context else ""
     parts = [
-        f"rating={rating_value};;;0;5",
+        f"rating={rating_value};{warn};{crit};0;5",
         f"vulnerabilities={num_vulns};;;0;",
     ]
     if duration_seconds is not None:
         parts.append(f"time={duration_seconds:.3f}s;;;0;")
+    if missing_hardenings is not None:
+        parts.append(f"hardenings_missing={missing_hardenings};;;0;")
     return " ".join(parts)
 
 
@@ -398,6 +705,86 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--timeout",
+        type=int,
+        default=_env_int("TIMEOUT", DEFAULT_TIMEOUT_SECONDS),
+        help=(
+            f"HTTP timeout in seconds for each Scan API call. "
+            f"Default: {DEFAULT_TIMEOUT_SECONDS} (env: {ENV_PREFIX}TIMEOUT)."
+        ),
+    )
+    parser.add_argument(
+        "-w",
+        "--warning",
+        type=int,
+        default=_env_int("WARNING", DEFAULT_WARNING_RATING),
+        help=(
+            "Rating (0-5) at or below which the check reports WARNING. "
+            f"Default: {DEFAULT_WARNING_RATING} ({RATE_MAP[DEFAULT_WARNING_RATING]}), "
+            f"env: {ENV_PREFIX}WARNING."
+        ),
+    )
+    parser.add_argument(
+        "-c",
+        "--critical",
+        type=int,
+        default=_env_int("CRITICAL", DEFAULT_CRITICAL_RATING),
+        help=(
+            "Rating (0-5) at or below which the check reports CRITICAL. "
+            f"Default: {DEFAULT_CRITICAL_RATING} ({RATE_MAP[DEFAULT_CRITICAL_RATING]}), "
+            f"env: {ENV_PREFIX}CRITICAL."
+        ),
+    )
+    parser.add_argument(
+        "--check-hardening",
+        action="store_true",
+        default=_env_bool("CHECK_HARDENING"),
+        help=(
+            "Also report hardening measures and security headers the Scan API "
+            "found missing, raising an otherwise OK result to WARNING. "
+            f"Default: False (env: {ENV_PREFIX}CHECK_HARDENING)."
+        ),
+    )
+    parser.add_argument(
+        "--webhook-url",
+        default=_env("WEBHOOK_URL"),
+        help=(
+            "Optional HTTP(S) endpoint that receives a JSON notification when the "
+            "check reaches the state selected by --webhook-on. Disabled when unset "
+            f"(env: {ENV_PREFIX}WEBHOOK_URL)."
+        ),
+    )
+    parser.add_argument(
+        "--webhook-on",
+        choices=sorted(WEBHOOK_TRIGGERS),
+        default=_env("WEBHOOK_ON") or DEFAULT_WEBHOOK_ON,
+        help=(
+            "Lowest state that triggers the webhook: 'critical' only, 'warning' and "
+            "worse, 'unknown' and worse, or 'always'. "
+            f"Default: {DEFAULT_WEBHOOK_ON} (env: {ENV_PREFIX}WEBHOOK_ON)."
+        ),
+    )
+    parser.add_argument(
+        "--webhook-header",
+        action="append",
+        default=None,
+        metavar="NAME:VALUE",
+        help=(
+            "Extra HTTP header for the webhook request, e.g. "
+            "'X-Auth-Token: <token>'. May be given multiple times "
+            f"(env: {ENV_PREFIX}WEBHOOK_HEADERS, entries separated by ';')."
+        ),
+    )
+    parser.add_argument(
+        "--webhook-timeout",
+        type=int,
+        default=_env_int("WEBHOOK_TIMEOUT", DEFAULT_WEBHOOK_TIMEOUT_SECONDS),
+        help=(
+            f"HTTP timeout in seconds for the webhook call. "
+            f"Default: {DEFAULT_WEBHOOK_TIMEOUT_SECONDS} (env: {ENV_PREFIX}WEBHOOK_TIMEOUT)."
+        ),
+    )
+    parser.add_argument(
         "--backoff-factor",
         type=float,
         default=_env_float("BACKOFF_FACTOR", DEFAULT_BACKOFF_FACTOR),
@@ -408,6 +795,52 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def _parse_webhook_headers(raw_headers: list[str] | None) -> tuple[tuple[str, str], ...]:
+    """
+    Parse 'Name: value' header strings into a tuple of pairs.
+
+    Falls back to the CNS_WEBHOOK_HEADERS environment variable (entries
+    separated by ';') when no --webhook-header flag was given. Entries without
+    a colon are skipped with a warning rather than aborting the check.
+    """
+    entries = raw_headers
+    if entries is None:
+        env_value = _env("WEBHOOK_HEADERS")
+        entries = env_value.split(";") if env_value else []
+
+    headers: list[tuple[str, str]] = []
+    for entry in entries:
+        name, separator, value = entry.partition(":")
+        if not separator or not name.strip():
+            LOGGER.warning("Ignoring malformed webhook header %r (expected 'Name: value').", entry)
+            continue
+        headers.append((name.strip(), value.strip()))
+    return tuple(headers)
+
+
+def _validate_thresholds(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Reject rating thresholds outside 0-5 or with critical above warning."""
+    for name in ("warning", "critical"):
+        value = getattr(args, name)
+        if not MIN_RATING <= value <= MAX_RATING:
+            parser.error(
+                f"--{name} must be a rating between {MIN_RATING} and {MAX_RATING}, got {value}."
+            )
+    if args.critical > args.warning:
+        parser.error(
+            f"--critical ({args.critical}) must not be higher than --warning ({args.warning})."
+        )
+    if args.timeout <= 0:
+        parser.error(f"--timeout must be a positive number of seconds, got {args.timeout}.")
+    if args.webhook_timeout <= 0:
+        parser.error(
+            "--webhook-timeout must be a positive number of seconds, "
+            f"got {args.webhook_timeout}."
+        )
+    if args.webhook_url and not args.webhook_url.lower().startswith(("http://", "https://")):
+        parser.error(f"--webhook-url must be an http(s) URL, got {args.webhook_url!r}.")
 
 
 def _parse_hosts(raw_host: str) -> list[str]:
@@ -430,6 +863,14 @@ def _build_context(host: str, args: argparse.Namespace) -> ScanContext:
         rescan=args.rescan,
         retries=args.retries,
         backoff_factor=args.backoff_factor,
+        timeout=args.timeout,
+        warning_rating=args.warning,
+        critical_rating=args.critical,
+        check_hardening=args.check_hardening,
+        webhook_url=args.webhook_url,
+        webhook_on=args.webhook_on,
+        webhook_timeout=args.webhook_timeout,
+        webhook_headers=_parse_webhook_headers(args.webhook_header),
     )
 
 
@@ -516,6 +957,8 @@ def main() -> None:
     hosts = _parse_hosts(args.host or "")
     if not hosts:
         parser.error(f"--host must not be empty (or set the {ENV_PREFIX}HOST environment variable).")
+
+    _validate_thresholds(parser, args)
 
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,

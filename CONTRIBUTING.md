@@ -5,6 +5,7 @@
     * [1. Install `uv`](#1-install-uv)
   * [Install Dependencies](#install-dependencies)
   * [Running Tests](#running-tests)
+    * [End-to-end tests](#end-to-end-tests)
   * [Linting](#linting)
 <!-- TOC -->
 
@@ -49,6 +50,22 @@ To run the complete test suite:
 ```
 uv run --group test pytest
 ```
+
+### End-to-end tests
+
+`tests/test_e2e_scan_api.py` runs the plugin as a real subprocess against a
+local stand-in for `scan.nextcloud.com` (`tests/fake_scan_server.py`). The
+server replays canned responses modelled on the real Scan API (see
+`tests/fixtures/`), so no Nextcloud instance, Docker container or internet
+access is required.
+
+To run only the end-to-end tests:
+```
+uv run --group test pytest tests/test_e2e_scan_api.py
+```
+
+To cover a new API behaviour, add a fixture to `tests/fixtures/` and register
+it in `DEFAULT_FIXTURES` in `tests/fake_scan_server.py`.
 
 ## Linting
 We use Ruff for linting and code formatting checks.

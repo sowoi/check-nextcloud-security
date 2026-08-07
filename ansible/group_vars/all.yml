@@ -9,4 +9,11 @@
 # nextcloud_check_debug: false
 # nextcloud_check_retries: 2
 # nextcloud_check_backoff_factor: 0.5
+# nextcloud_check_timeout: 10
+# nextcloud_check_warning: 3
+# nextcloud_check_critical: 1
+# nextcloud_check_check_hardening: false
+# nextcloud_check_webhook_url: "https://hooks.example.com/nextcloud"
+# nextcloud_check_webhook_on: critical
+# nextcloud_check_webhook_timeout: 10
 # nextcloud_check_interval: 24h

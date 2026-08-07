@@ -17,4 +17,13 @@ object Service "{{ nextcloud_check_service_name }}" {
     vars.nextcloud_debug = {{ nextcloud_check_debug | lower }}
     vars.nextcloud_retries = {{ nextcloud_check_retries }}
     vars.nextcloud_backoff_factor = {{ nextcloud_check_backoff_factor }}
+    vars.nextcloud_timeout = {{ nextcloud_check_timeout }}
+    vars.nextcloud_warning = {{ nextcloud_check_warning }}
+    vars.nextcloud_critical = {{ nextcloud_check_critical }}
+    vars.nextcloud_check_hardening = {{ nextcloud_check_check_hardening | lower }}
+{% if nextcloud_check_webhook_url %}
+    vars.nextcloud_webhook_url = "{{ nextcloud_check_webhook_url }}"
+    vars.nextcloud_webhook_on = "{{ nextcloud_check_webhook_on }}"
+    vars.nextcloud_webhook_timeout = {{ nextcloud_check_webhook_timeout }}
+{% endif %}
 }
