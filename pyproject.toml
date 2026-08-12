@@ -1,7 +1,7 @@
 [project]
 name = "check-nextcloud-security"
-version = "1.3.0"
-description = "Check the security level of your Nextcloud instance with the Nextcloud Security API "
+version = "1.4.0"
+description = "Check the security level of your Nextcloud instance - via scan.nextcloud.com or a self-hosted local scanner"
 authors = [{ name = "Massoud Ahmed" }, { name = "Georg Schlagholz"}]
 requires-python = ">=3.10"
 readme = "README.md"
@@ -10,16 +10,31 @@ dependencies = [
     "certifi>=2026.7.22",
     "requests>=2.34.2",
     "types-requests>=2.33.0.20260712",
+    "PyYAML>=6.0.3",
 ]
 
 [project.scripts]
 check-nextcloud-security = "check_nextcloud_security:main"
+check-nextcloud-scanner = "nextcloud_local_scan.cli:main"
 
 [tool.uv]
 package = true
 
 [tool.hatch.build.targets.wheel]
-py-modules = ["check_nextcloud_security"]
+only-include = [
+    "check_nextcloud_security.py",
+    "nextcloud_local_scan",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "check_nextcloud_security.py",
+    "nextcloud_local_scan/",
+    "tests/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+]
 
 [build-system]
 requires = ["hatchling"]

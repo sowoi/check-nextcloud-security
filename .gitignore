@@ -178,3 +178,11 @@ pyrightconfig.json
 /uv.lock
 /.nox
 /.mypy_cache
+# Local secret files for docker-compose (only the *.example files are tracked)
+/secrets/*
+!/secrets/*.example
+!/secrets/README.md
+
+# Generated with `uv export` when a deployment tool needs it - never committed
+/requirements.txt
+/requirements-*.txt

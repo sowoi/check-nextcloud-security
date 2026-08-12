@@ -1,0 +1,44 @@
+{
+    "domain": "outdated.example.com",
+    "url": "https://outdated.example.com/status.php",
+    "version": "28.0.4.1",
+    "product": "Nextcloud",
+    "edition": "",
+    "scannedAt": {
+        "date": "2026-08-07 06:28:56.000000",
+        "timezone_type": 3,
+        "timezone": "UTC"
+    },
+    "rating": 3,
+    "vulnerabilities": [
+        {
+            "id": "CVE-2023-28998",
+            "description": "Missing rate limiting on password reset.",
+            "cwe": "CWE-307"
+        }
+    ],
+    "hardenings": {
+        "bruteforceProtection": true,
+        "CSPv3": true,
+        "sameSiteCookies": true,
+        "passwordConfirmation": true,
+        "__HostPrefix": true,
+        "appPasswordsCanBeRestricted": true,
+        "appPasswordsScannedForHaveIBeenPwned": true
+    },
+    "setup": {
+        "https": {
+            "enforced": true,
+            "used": true
+        },
+        "headers": {
+            "X-Frame-Options": false,
+            "X-Content-Type-Options": false,
+            "X-XSS-Protection": false,
+            "X-Download-Options": true,
+            "X-Permitted-Cross-Domain-Policies": false
+        }
+    },
+    "EOL": false,
+    "latestVersionInBranch": false
+}

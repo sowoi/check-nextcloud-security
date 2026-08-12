@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-Check a Nextcloud instance for known vulnerabilities using scan.nextcloud.com API.
+Check a Nextcloud instance for known vulnerabilities.
+
+By default the public scan.nextcloud.com API is used. With
+'--scan-backend local' the very same checks run locally - either in-process
+or against a self-hosted scanner container - so no data about the instance
+leaves the network. Update information is taken from the local Nextcloud
+instance through the serverinfo app.
+
 Authors: Massoud Ahmed, Georg Schlagholz (IT-Native GmbH)
 """
 import argparse
@@ -8,25 +15,49 @@ import contextlib
 import io
 import ipaddress
 import logging
-import os
 import sys
 import time
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import IntEnum
 from typing import Any, NoReturn, TypeVar
 
 import requests
 
+from nextcloud_local_scan import (
+    Configuration,
+    ConfigurationError,
+    ScanError,
+    ScannerSettings,
+    ServerInfoSettings,
+    UpdateInfo,
+    failed_extra_checks,
+    fetch_update_info,
+    load_configuration,
+    scanner_settings_from_config,
+    serverinfo_settings_from_config,
+)
+from nextcloud_local_scan import scan as local_scan
+from nextcloud_local_scan.serverinfo import MODES as SERVERINFO_MODES
+
 __version__ = "1.4.0"
 
 LOGGER = logging.getLogger("check_nextcloud")
 
-SCAN_QUEUE_URL = "https://scan.nextcloud.com/api/queue"
-SCAN_RESULT_URL = "https://scan.nextcloud.com/api/result"
-SCAN_REQUEUE_URL = "https://scan.nextcloud.com/api/requeue"
+# Base URL of the Scan API. Point this at the local scanner container to keep
+# every request inside your own network.
+DEFAULT_SCAN_BASE_URL = "https://scan.nextcloud.com"
+
+SCAN_QUEUE_URL = f"{DEFAULT_SCAN_BASE_URL}/api/queue"
+SCAN_RESULT_URL = f"{DEFAULT_SCAN_BASE_URL}/api/result"
+SCAN_REQUEUE_URL = f"{DEFAULT_SCAN_BASE_URL}/api/requeue"
+
+# 'remote' talks to a Scan API (scan.nextcloud.com or a local container),
+# 'local' performs the checks in-process without any scan service.
+SCAN_BACKENDS = ("remote", "local")
+DEFAULT_SCAN_BACKEND = "remote"
 
 DEFAULT_TIMEOUT_SECONDS = 10
 
@@ -98,6 +129,35 @@ class ScanContext:
     webhook_timeout: int = DEFAULT_WEBHOOK_TIMEOUT_SECONDS
     # Stored as a tuple of pairs so ScanContext stays hashable/frozen.
     webhook_headers: tuple[tuple[str, str], ...] = ()
+    # Scan backend: 'remote' uses a Scan API (the public one by default, or
+    # the local container via --scan-url), 'local' runs the checks in-process.
+    scan_backend: str = DEFAULT_SCAN_BACKEND
+    scan_base_url: str = DEFAULT_SCAN_BASE_URL
+    scan_token: str | None = None
+    scanner_settings: ScannerSettings | None = None
+    # Update check against the local instance via the serverinfo app.
+    serverinfo_settings: ServerInfoSettings | None = None
+    update_check: bool = True
+    update_warning: bool = False
+
+    @property
+    def queue_url(self) -> str:
+        """Scan API endpoint that queues a new scan."""
+        return f"{self.scan_base_url.rstrip('/')}/api/queue"
+
+    @property
+    def requeue_url(self) -> str:
+        """Scan API endpoint that forces a rescan."""
+        return f"{self.scan_base_url.rstrip('/')}/api/requeue"
+
+    @property
+    def result_url(self) -> str:
+        """Scan API endpoint prefix that serves scan results."""
+        return f"{self.scan_base_url.rstrip('/')}/api/result"
+
+    def result_url_for(self, uuid: str) -> str:
+        """Full result URL of one scan."""
+        return f"{self.result_url}/{uuid}"
 
 
 @dataclass(frozen=True)
@@ -121,40 +181,42 @@ class ScanResult:
     uuid: str
 
 
-# --- Environment variable helpers ---
+# --- Configuration helpers ---
+# Replaced in main() by the configuration loaded from the YAML file; the
+# default instance still resolves CNS_ environment variables and secret
+# references, so importing the module keeps working without a config file.
+_CONFIG: Configuration = Configuration()
+
+
+def _set_configuration(config: Configuration) -> None:
+    """Install the configuration used as the source for argparse defaults."""
+    global _CONFIG
+    _CONFIG = config
+
+
 def _env(name: str) -> str | None:
-    """Read a CNS_-prefixed environment variable (e.g. CNS_HOST)."""
-    return os.environ.get(f"{ENV_PREFIX}{name}")
+    """
+    Read a configuration value (e.g. HOST -> CNS_HOST or 'host:' in YAML).
+
+    Environment variables win over the configuration file, and both support
+    secret references such as 'secret://token' or a '<NAME>_FILE' variant.
+    """
+    return _CONFIG.get(name)
 
 
 def _env_bool(name: str) -> bool:
-    """Interpret a CNS_-prefixed environment variable as a boolean flag."""
-    value = _env(name)
-    return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}
+    """Interpret a configuration value as a boolean flag."""
+    return _CONFIG.get_bool(name)
 
 
 def _env_int(name: str, default: int) -> int:
-    """Read a CNS_-prefixed environment variable as an int, falling back to default."""
-    value = _env(name)
-    if not value:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        LOGGER.warning("Ignoring invalid %s%s=%r (expected an integer).", ENV_PREFIX, name, value)
-        return default
+    """Read a configuration value as an int, falling back to default."""
+    return _CONFIG.get_int(name, default)
 
 
 def _env_float(name: str, default: float) -> float:
-    """Read a CNS_-prefixed environment variable as a float, falling back to default."""
-    value = _env(name)
-    if not value:
-        return default
-    try:
-        return float(value)
-    except ValueError:
-        LOGGER.warning("Ignoring invalid %s%s=%r (expected a number).", ENV_PREFIX, name, value)
-        return default
+    """Read a configuration value as a float, falling back to default."""
+    return _CONFIG.get_float(name, default)
 
 
 def _fail(message: str, exit_code: NagiosExitCode = NagiosExitCode.UNKNOWN) -> NoReturn:
@@ -165,7 +227,15 @@ def _fail(message: str, exit_code: NagiosExitCode = NagiosExitCode.UNKNOWN) -> N
 
 def _build_request_info(context: ScanContext) -> ScanRequestInfo:
     """Build the shared request parameters (headers, payload, proxies) for a context."""
+    headers = {
+        "Content-type": "application/x-www-form-urlencoded",
+        "X-CSRF": "true",
+    }
+    if context.scan_token:
+        # Only the self-hosted scanner container evaluates this header.
+        headers["X-Auth-Token"] = context.scan_token
     return ScanRequestInfo(
+        headers=headers,
         data={"url": context.host},
         proxies={"http": context.proxy, "https": context.proxy} if context.proxy else None,
         timeout=context.timeout,
@@ -203,12 +273,13 @@ def _call_with_retry(
 
 
 # --- Utility Functions ---
-def check_if_ip_or_host(host: str) -> None:
+def check_if_ip_or_host(host: str, context: ScanContext | None = None) -> None:
     """
-    Exit if host is an IP address (not supported by the API).
+    Exit if host is an IP address (not supported by the public Scan API).
 
     Accepts both plain IPv4/IPv6 literals and the bracketed IPv6 form
-    ('[2001:db8::1]') that may be copied from a URL.
+    ('[2001:db8::1]') that may be copied from a URL. The local scanner has no
+    such restriction, so IP addresses pass when '--scan-backend local' is used.
     """
     candidate = host.strip()
     if candidate.startswith("[") and candidate.endswith("]"):
@@ -221,21 +292,50 @@ def check_if_ip_or_host(host: str) -> None:
         ipaddress.ip_address(candidate)
     except ValueError:
         return
+    if context is not None and context.scan_backend == "local":
+        return
     _fail("IP addresses are not supported by the Scan API.")
 
 
+def _run_local_scan(context: ScanContext) -> ScanResult:
+    """Run the checks locally, without contacting any scan service."""
+    LOGGER.debug("Running local scan for host: %s", context.host)
+    try:
+        response = local_scan(
+            context.host,
+            settings=context.scanner_settings or ScannerSettings(timeout=context.timeout),
+            serverinfo_settings=context.serverinfo_settings,
+        )
+    except ScanError as exc:
+        LOGGER.debug("Local scan failed for %s: %s", context.host, exc, exc_info=True)
+        _notify_and_fail(context, f"UNKNOWN: {context.host} Local scan failed: {exc}")
+    return ScanResult(response=response, uuid=f"local-{context.host}")
+
+
 def send_scan_request(context: ScanContext) -> ScanResult:
-    """Send initial security check request to the Nextcloud Scan Server."""
+    """
+    Obtain a scan result for the configured host.
+
+    Dispatches to the in-process scanner when '--scan-backend local' is
+    selected and to the Scan API (public or self-hosted container) otherwise.
+    """
+    if context.scan_backend == "local":
+        return _run_local_scan(context)
+    return _send_remote_scan_request(context)
+
+
+def _send_remote_scan_request(context: ScanContext) -> ScanResult:
+    """Send initial security check request to a Nextcloud Scan API server."""
 
     request_info = _build_request_info(context)
 
-    LOGGER.debug("Initiating scan for host: %s", context.host)
+    LOGGER.debug("Initiating scan for host: %s via %s", context.host, context.scan_base_url)
     if context.proxy:
         LOGGER.debug("Using proxy: %s", context.proxy)
 
     def _queue_scan() -> Any:
         response = requests.post(
-            SCAN_QUEUE_URL,
+            context.queue_url,
             headers=request_info.headers,
             data=request_info.data,
             proxies=request_info.proxies,
@@ -253,6 +353,14 @@ def send_scan_request(context: ScanContext) -> ScanResult:
         )
     except REQUEST_ERRORS as exc:
         LOGGER.debug("Scan request failed for %s: %s", context.host, exc, exc_info=True)
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            # The scan service itself is unreachable - saying the instance is
+            # not a Nextcloud would send everyone looking in the wrong place.
+            _notify_and_fail(
+                context,
+                f"UNKNOWN: {context.host} Scan service {context.scan_base_url} "
+                f"is unreachable: {exc}",
+            )
         _notify_and_fail(
             context,
             f"UNKNOWN: {context.host} Scan failed! Either no Nextcloud/ownCloud found "
@@ -270,7 +378,7 @@ def send_scan_request(context: ScanContext) -> ScanResult:
 
     def _fetch_result() -> Any:
         return requests.get(
-            f"{SCAN_RESULT_URL}/{uuid}",
+            context.result_url_for(uuid),
             proxies=request_info.proxies,
             timeout=request_info.timeout,
         ).json()
@@ -300,15 +408,18 @@ def check_vulnerabilities(
 
     request_info = _build_request_info(context)
 
-    uuid_url = f"{SCAN_RESULT_URL}/{scan_result.uuid}"
+    uuid_url = context.result_url_for(scan_result.uuid)
     response_scan = scan_result.response
 
-    if context.rescan:
+    if context.rescan and context.scan_backend == "local":
+        # A local scan is always fresh, so there is nothing to requeue.
+        LOGGER.debug("Ignoring --rescan: the local backend never serves cached results.")
+    elif context.rescan:
         LOGGER.debug("Triggering rescan for %s", scan_result.uuid)
 
         def _requeue_scan() -> Any:
             requests.post(
-                SCAN_REQUEUE_URL,
+                context.requeue_url,
                 headers=request_info.headers,
                 data=request_info.data,
                 proxies=request_info.proxies,
@@ -359,6 +470,28 @@ def check_vulnerabilities(
         else:
             detail_lines.append("Hardening: all checked measures in place")
 
+    extra_failures = failed_extra_checks(response_scan)
+    if response_scan.get("extraChecks"):
+        if extra_failures:
+            detail_lines.append(
+                f"Additional checks failed ({len(extra_failures)}): "
+                f"{', '.join(extra_failures[:5])}"
+                + (f" (+{len(extra_failures) - 5} more)" if len(extra_failures) > 5 else "")
+            )
+        else:
+            detail_lines.append("Additional checks: all passed")
+
+    update_info = _resolve_update_info(context, response_scan)
+    if update_info is not None and (update_info.known or update_info.error):
+        detail_lines.append(update_info.summary())
+        if context.update_warning and update_info.available and exit_code is NagiosExitCode.OK:
+            msg = (
+                "WARNING: Update available "
+                f"({update_info.available_version or 'unknown version'}), "
+                "but no known vulnerabilities."
+            )
+            exit_code = NagiosExitCode.WARNING
+
     perfdata = _build_perfdata(
         rating,
         RATE_MAP,
@@ -366,6 +499,8 @@ def check_vulnerabilities(
         duration_seconds,
         context=context,
         missing_hardenings=len(missing_hardenings) if context.check_hardening else None,
+        failed_extra_checks_count=len(extra_failures) if response_scan.get("extraChecks") else None,
+        update_available=update_info.available if update_info is not None else None,
     )
 
     if _webhook_should_fire(context, exit_code):
@@ -380,11 +515,44 @@ def check_vulnerabilities(
             vulnerabilities=vulnerabilities,
             missing_hardenings=missing_hardenings,
             duration_seconds=duration_seconds,
+            update_info=update_info,
+            extra_failures=extra_failures,
         )
         if not _send_webhook(context, payload):
             detail_lines.append("Webhook delivery failed (see debug log)")
 
     _fail(f"{msg}\n" + "\n".join(detail_lines) + f" | {perfdata}", exit_code)
+
+
+def _resolve_update_info(
+    context: ScanContext, response_scan: dict[str, Any]
+) -> UpdateInfo | None:
+    """
+    Determine the update state of the instance.
+
+    A local scan already carries the answer of the serverinfo app; for the
+    remote backend the local instance is asked here, so that update
+    information never depends on scan.nextcloud.com.
+    """
+    if not context.update_check:
+        return None
+
+    embedded = response_scan.get("updates")
+    if isinstance(embedded, dict):
+        return UpdateInfo(
+            available=embedded.get("available"),
+            version=embedded.get("version"),
+            available_version=embedded.get("availableVersion"),
+            app_updates=dict(embedded.get("appUpdates") or {}),
+            last_checked_at=embedded.get("lastCheckedAt"),
+            source=str(embedded.get("source") or "unknown"),
+            error=embedded.get("error"),
+        )
+
+    settings = context.serverinfo_settings
+    if settings is None or settings.effective_mode() == "off":
+        return None
+    return fetch_update_info(settings, context.host)
 
 
 def _webhook_should_fire(context: ScanContext, exit_code: NagiosExitCode) -> bool:
@@ -421,6 +589,8 @@ def _build_webhook_payload(
     vulnerabilities: list[dict[str, Any]],
     missing_hardenings: list[str],
     duration_seconds: float | None,
+    update_info: UpdateInfo | None = None,
+    extra_failures: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Build the JSON document posted to the webhook.
@@ -443,8 +613,11 @@ def _build_webhook_payload(
             entry.get("id") for entry in vulnerabilities if isinstance(entry, dict)
         ],
         "missing_hardenings": missing_hardenings if context.check_hardening else [],
-        "scan_url": f"{SCAN_RESULT_URL}/{scan_result.uuid}",
+        "failed_extra_checks": extra_failures or [],
+        "scan_backend": context.scan_backend,
+        "scan_url": context.result_url_for(scan_result.uuid),
         "scan_uuid": scan_result.uuid,
+        "update": update_info.as_dict() if update_info is not None else None,
         "duration_seconds": round(duration_seconds, 3) if duration_seconds is not None else None,
     }
 
@@ -618,6 +791,8 @@ def _build_perfdata(
     duration_seconds: float | None,
     context: ScanContext | None = None,
     missing_hardenings: int | None = None,
+    failed_extra_checks_count: int | None = None,
+    update_available: bool | None = None,
 ) -> str:
     """
     Build a Nagios/Icinga performance data string.
@@ -641,6 +816,10 @@ def _build_perfdata(
         parts.append(f"time={duration_seconds:.3f}s;;;0;")
     if missing_hardenings is not None:
         parts.append(f"hardenings_missing={missing_hardenings};;;0;")
+    if failed_extra_checks_count is not None:
+        parts.append(f"extra_checks_failed={failed_extra_checks_count};;;0;")
+    if update_available is not None:
+        parts.append(f"update_available={int(update_available)};;;0;1")
     return " ".join(parts)
 
 
@@ -687,6 +866,138 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--proxy",
         default=_env("PROXY"),
         help=f"Proxy server address. Default: None (env: {ENV_PREFIX}PROXY).",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help=(
+            "Path to a YAML configuration file. Default: the first existing file "
+            "of ./check-nextcloud-security.yml or /etc/check-nextcloud-security/config.yml "
+            f"(env: {ENV_PREFIX}CONFIG_FILE)."
+        ),
+    )
+    parser.add_argument(
+        "--scan-backend",
+        choices=SCAN_BACKENDS,
+        default=(_env("SCAN_BACKEND") or DEFAULT_SCAN_BACKEND),
+        help=(
+            "Where the checks run: 'remote' queries a Scan API (scan.nextcloud.com "
+            "by default, or your own container via --scan-url), 'local' performs "
+            f"them in-process. Default: {DEFAULT_SCAN_BACKEND} "
+            f"(env: {ENV_PREFIX}SCAN_BACKEND)."
+        ),
+    )
+    parser.add_argument(
+        "--scan-url",
+        default=_env("SCAN_URL"),
+        help=(
+            "Base URL of the Scan API, e.g. 'http://nextcloud-scanner:8080' for the "
+            f"local container. Default: {DEFAULT_SCAN_BASE_URL} (env: {ENV_PREFIX}SCAN_URL)."
+        ),
+    )
+    parser.add_argument(
+        "--scan-token",
+        default=_env("SCAN_TOKEN"),
+        help=(
+            "Token sent as X-Auth-Token to a self-hosted scanner container. "
+            f"Default: None (env: {ENV_PREFIX}SCAN_TOKEN, supports secret:// references)."
+        ),
+    )
+    parser.add_argument(
+        "--no-extra-checks",
+        action="store_true",
+        default=_env_bool("NO_EXTRA_CHECKS"),
+        help=(
+            "With --scan-backend local, run only the checks scan.nextcloud.com "
+            "performs and skip the additional TLS, exposure and header checks. "
+            f"Default: False (env: {ENV_PREFIX}NO_EXTRA_CHECKS)."
+        ),
+    )
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        default=_env_bool("INSECURE"),
+        help=(
+            "Do not verify the TLS certificate of the scanned instance (local "
+            f"backend only). Default: False (env: {ENV_PREFIX}INSECURE)."
+        ),
+    )
+    parser.add_argument(
+        "--serverinfo-mode",
+        choices=SERVERINFO_MODES,
+        default=_env("SERVERINFO_MODE"),
+        help=(
+            "How the local instance is asked for updates: 'api' (serverinfo OCS "
+            "endpoint), 'occ' (local `occ serverinfo`), 'off', or 'auto' to use "
+            "whichever is configured. Default: auto "
+            f"(env: {ENV_PREFIX}SERVERINFO_MODE)."
+        ),
+    )
+    parser.add_argument(
+        "--serverinfo-url",
+        default=None,
+        help=(
+            "Base URL of the Nextcloud instance for the serverinfo API. "
+            f"Default: https://<host> (env: {ENV_PREFIX}SERVERINFO_URL)."
+        ),
+    )
+    parser.add_argument(
+        "--serverinfo-token",
+        default=None,
+        help=(
+            "Monitoring token sent as NC-Token to the serverinfo app (env: "
+            f"{ENV_PREFIX}SERVERINFO_TOKEN, also as {ENV_PREFIX}SERVERINFO_TOKEN_FILE "
+            "or a secret:// reference)."
+        ),
+    )
+    parser.add_argument(
+        "--serverinfo-user",
+        default=None,
+        help=f"Admin user for the serverinfo API (env: {ENV_PREFIX}SERVERINFO_USER).",
+    )
+    parser.add_argument(
+        "--serverinfo-password",
+        default=None,
+        help=(
+            "Password or app password for --serverinfo-user (env: "
+            f"{ENV_PREFIX}SERVERINFO_PASSWORD, supports secret:// references)."
+        ),
+    )
+    parser.add_argument(
+        "--serverinfo-occ",
+        default=None,
+        metavar="COMMAND",
+        help=(
+            "occ command used for the update check, e.g. 'php /var/www/html/occ' "
+            f"(env: {ENV_PREFIX}SERVERINFO_OCC_COMMAND)."
+        ),
+    )
+    parser.add_argument(
+        "--serverinfo-container",
+        default=None,
+        help=(
+            "Run the occ command inside this container via 'docker exec' "
+            f"(env: {ENV_PREFIX}SERVERINFO_CONTAINER)."
+        ),
+    )
+    parser.add_argument(
+        "--no-update-check",
+        action="store_true",
+        default=_env_bool("NO_UPDATE_CHECK"),
+        help=(
+            "Never ask the local instance for updates, regardless of any "
+            "serverinfo settings. Equivalent to --serverinfo-mode off. "
+            f"Default: False (env: {ENV_PREFIX}NO_UPDATE_CHECK)."
+        ),
+    )
+    parser.add_argument(
+        "--update-warning",
+        action="store_true",
+        default=_env_bool("UPDATE_WARNING"),
+        help=(
+            "Report WARNING when the local instance announces a pending server "
+            f"update. Default: False (env: {ENV_PREFIX}UPDATE_WARNING)."
+        ),
     )
     parser.add_argument(
         "-r",
@@ -843,19 +1154,63 @@ def _validate_thresholds(parser: argparse.ArgumentParser, args: argparse.Namespa
         parser.error(f"--webhook-url must be an http(s) URL, got {args.webhook_url!r}.")
 
 
+def _normalise_host(raw: str) -> str:
+    """
+    Reduce a --host value to the bare host (optionally with a port).
+
+    A full URL is a natural thing to paste, so 'https://cloud.example.com/'
+    and 'cloud.example.com' are treated alike. Credentials, path, query and
+    fragment are dropped; the port is kept because the local backend and a
+    self-hosted scanner support non-standard ports.
+    """
+    host = raw.strip()
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    # Drop path, query and fragment, but keep a bracketed IPv6 literal intact.
+    for separator in ("/", "?", "#"):
+        head, sep, _ = host.partition(separator)
+        if sep and not (separator == "/" and not head):
+            host = head
+    if "@" in host:
+        host = host.rsplit("@", 1)[1]
+    return host.strip().rstrip(".")
+
+
 def _parse_hosts(raw_host: str) -> list[str]:
     """
     Split a --host value into a list of hosts.
 
-    Accepts a single hostname or a comma-separated list (e.g.
-    'a.example.com, b.example.com'). Blank entries (from stray commas or
-    surrounding whitespace) are dropped.
+    Accepts a single hostname, a full URL or a comma-separated list (e.g.
+    'a.example.com, https://b.example.com'). Blank entries (from stray commas
+    or surrounding whitespace) are dropped.
     """
-    return [part.strip() for part in raw_host.split(",") if part.strip()]
+    hosts = [_normalise_host(part) for part in raw_host.split(",")]
+    return [host for host in hosts if host]
 
 
 def _build_context(host: str, args: argparse.Namespace) -> ScanContext:
     """Build a ScanContext for a single host from the parsed CLI arguments."""
+    scanner_settings = scanner_settings_from_config(
+        _CONFIG,
+        timeout=args.timeout,
+        proxy=args.proxy,
+        extra_checks=False if args.no_extra_checks else None,
+        verify_tls=False if args.insecure else None,
+    )
+    serverinfo_settings = serverinfo_settings_from_config(
+        _CONFIG,
+        mode="off" if args.no_update_check else args.serverinfo_mode,
+        url=args.serverinfo_url,
+        token=args.serverinfo_token,
+        user=args.serverinfo_user,
+        password=args.serverinfo_password,
+        occ_command=args.serverinfo_occ,
+        container=args.serverinfo_container,
+        proxy=args.proxy,
+    )
+    if not args.no_update_check and (args.serverinfo_occ or args.serverinfo_container):
+        serverinfo_settings = replace(serverinfo_settings, occ_configured=True)
+
     return ScanContext(
         host=host,
         proxy=args.proxy,
@@ -871,6 +1226,13 @@ def _build_context(host: str, args: argparse.Namespace) -> ScanContext:
         webhook_on=args.webhook_on,
         webhook_timeout=args.webhook_timeout,
         webhook_headers=_parse_webhook_headers(args.webhook_header),
+        scan_backend=args.scan_backend,
+        scan_base_url=args.scan_url or DEFAULT_SCAN_BASE_URL,
+        scan_token=args.scan_token,
+        scanner_settings=scanner_settings,
+        serverinfo_settings=serverinfo_settings,
+        update_check=not args.no_update_check,
+        update_warning=args.update_warning,
     )
 
 
@@ -903,7 +1265,7 @@ def _run_single_host_check(context: ScanContext) -> tuple[str, NagiosExitCode]:
     exit_code = NagiosExitCode.UNKNOWN
     try:
         with contextlib.redirect_stdout(buffer):
-            check_if_ip_or_host(context.host)
+            check_if_ip_or_host(context.host, context)
             start = time.perf_counter()
             scan_result = send_scan_request(context)
             duration_seconds = time.perf_counter() - start
@@ -949,10 +1311,31 @@ def _run_multi_host_checks(hosts: list[str], args: argparse.Namespace) -> Nagios
     return _aggregate_exit_code(exit_codes)
 
 
+def _preparse_config(argv: list[str] | None = None) -> Configuration:
+    """
+    Load the configuration file before the real parser is built.
+
+    argparse defaults are read from the merged configuration, so the
+    '--config' flag (and CNS_CONFIG_FILE) has to be evaluated first.
+    """
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", default=None)
+    known, _ = pre_parser.parse_known_args(argv)
+    return load_configuration(known.config)
+
+
 def main() -> None:
     """Main entry point."""
+    try:
+        _set_configuration(_preparse_config())
+    except ConfigurationError as exc:
+        _fail(f"UNKNOWN: {exc}")
+
     parser = build_arg_parser()
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except ConfigurationError as exc:  # pragma: no cover - defensive
+        parser.error(str(exc))
 
     hosts = _parse_hosts(args.host or "")
     if not hosts:
@@ -965,12 +1348,17 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    if _CONFIG.source:
+        LOGGER.debug("Using configuration file %s", _CONFIG.source)
 
     if len(hosts) == 1:
-        context = _build_context(hosts[0], args)
-        LOGGER.debug("Starting scan for host: %s", context.host)
+        try:
+            context = _build_context(hosts[0], args)
+        except ConfigurationError as exc:
+            _fail(f"UNKNOWN: {exc}")
+        LOGGER.debug("Starting %s scan for host: %s", context.scan_backend, context.host)
 
-        check_if_ip_or_host(context.host)
+        check_if_ip_or_host(context.host, context)
 
         start = time.perf_counter()
         scan_result = send_scan_request(context)

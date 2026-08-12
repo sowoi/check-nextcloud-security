@@ -1,0 +1,41 @@
+name: Supported Nextcloud versions
+
+# Nextcloud publishes a new major release roughly every three months, so the
+# bundled release schedule is refreshed monthly in addition to the refresh that
+# happens during a release. Without this the local scanner would keep rating a
+# freshly retired major release as supported until the next release is cut.
+
+on:
+  schedule:
+    - cron: "17 4 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    name: Refresh release schedule
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Refresh supported versions
+        run: python scripts/update_supported_versions.py
+
+      - name: Open pull request on change
+        uses: peter-evans/create-pull-request@v7
+        with:
+          add-paths: nextcloud_local_scan/data/supported_versions.json
+          branch: chore/supported-versions
+          commit-message: "chore: refresh supported Nextcloud versions"
+          title: "chore: refresh supported Nextcloud versions"
+          body: |
+            Automated refresh of `nextcloud_local_scan/data/supported_versions.json`
+            from the [maintenance and release schedule](https://github.com/nextcloud/server/wiki/Maintenance-and-Release-Schedule).
+
+            Every major release below `oldest_supported` is rated `F` (end of life)
+            by the local scan backend.
+          delete-branch: true

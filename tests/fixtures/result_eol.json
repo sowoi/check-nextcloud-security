@@ -1,0 +1,38 @@
+{
+    "domain": "endoflife.example.com",
+    "url": "https://endoflife.example.com/status.php",
+    "version": "29.0.2.2",
+    "product": "Nextcloud",
+    "edition": "",
+    "scannedAt": {
+        "date": "2026-08-07 06:28:56.000000",
+        "timezone_type": 3,
+        "timezone": "UTC"
+    },
+    "rating": 0,
+    "vulnerabilities": [],
+    "hardenings": {
+        "bruteforceProtection": true,
+        "CSPv3": true,
+        "sameSiteCookies": true,
+        "passwordConfirmation": true,
+        "__HostPrefix": true,
+        "appPasswordsCanBeRestricted": true,
+        "appPasswordsScannedForHaveIBeenPwned": true
+    },
+    "setup": {
+        "https": {
+            "enforced": true,
+            "used": true
+        },
+        "headers": {
+            "X-Frame-Options": false,
+            "X-Content-Type-Options": false,
+            "X-XSS-Protection": false,
+            "X-Download-Options": true,
+            "X-Permitted-Cross-Domain-Policies": false
+        }
+    },
+    "EOL": true,
+    "latestVersionInBranch": false
+}

@@ -1,0 +1,71 @@
+# Local scan service plus a plugin run against it.
+#
+#   cp secrets/scanner_token.example secrets/scanner_token
+#   cp secrets/serverinfo_token.example secrets/serverinfo_token
+#   # ... then put the real values in (see secrets/README.md)
+#
+#   docker compose up -d scanner          # start the self-hosted scanner
+#   docker compose run --rm check         # run the check against it
+#
+# Every setting can also come from config/check-nextcloud-security.yml, from
+# CNS_ environment variables or from a secret (see the 'secrets' section).
+
+services:
+  scanner:
+    build: .
+    image: check-nextcloud-security:latest
+    container_name: nextcloud-scanner
+    entrypoint: ["check-nextcloud-scanner"]
+    command: ["serve"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # Bind address and port of the scan service.
+      CNS_SERVICE_LISTEN: "0.0.0.0"
+      CNS_SERVICE_PORT: "8080"
+      CNS_SERVICE_CACHE_TTL: "900"
+      # Optional shared secret; the plugin sends it via --scan-token.
+      CNS_SERVICE_TOKEN_FILE: /run/secrets/scanner_token
+      # Update information is taken from the local instance.
+      CNS_SERVERINFO_MODE: "api"
+      CNS_SERVERINFO_URL: "https://cloud.example.com"
+      CNS_SERVERINFO_TOKEN: "secret://serverinfo_token"
+      # Where to find secrets (Docker mounts them at /run/secrets).
+      CNS_SECRETS_DIR: /run/secrets
+    volumes:
+      - ./config:/etc/check-nextcloud-security:ro
+    secrets:
+      - scanner_token
+      - serverinfo_token
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  check:
+    build: .
+    image: check-nextcloud-security:latest
+    depends_on:
+      scanner:
+        condition: service_healthy
+    environment:
+      CNS_HOST: "cloud.example.com"
+      # Use the local container instead of scan.nextcloud.com.
+      CNS_SCAN_URL: "http://scanner:8080"
+      CNS_SCAN_TOKEN_FILE: /run/secrets/scanner_token
+      CNS_CHECK_HARDENING: "true"
+    volumes:
+      - ./config:/etc/check-nextcloud-security:ro
+    secrets:
+      - scanner_token
+
+# The files below are git-ignored; templates live next to them as
+# secrets/*.example. See secrets/README.md.
+secrets:
+  scanner_token:
+    file: ./secrets/scanner_token
+  serverinfo_token:
+    file: ./secrets/serverinfo_token
