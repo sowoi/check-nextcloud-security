@@ -50,10 +50,6 @@ LOGGER = logging.getLogger("check_nextcloud")
 # every request inside your own network.
 DEFAULT_SCAN_BASE_URL = "https://scan.nextcloud.com"
 
-SCAN_QUEUE_URL = f"{DEFAULT_SCAN_BASE_URL}/api/queue"
-SCAN_RESULT_URL = f"{DEFAULT_SCAN_BASE_URL}/api/result"
-SCAN_REQUEUE_URL = f"{DEFAULT_SCAN_BASE_URL}/api/requeue"
-
 # 'remote' talks to a Scan API (scan.nextcloud.com or a local container),
 # 'local' performs the checks in-process without any scan service.
 SCAN_BACKENDS = ("remote", "local")
