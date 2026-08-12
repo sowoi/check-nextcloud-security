@@ -1,0 +1,99 @@
+# Example configuration for check-nextcloud-security and the local scanner.
+#
+# Copy this file to one of the default locations
+#   ./check-nextcloud-security.yml
+#   /etc/check-nextcloud-security/config.yml
+# or point at it with --config / CNS_CONFIG_FILE.
+#
+# Every key below has an equivalent environment variable: nested keys are
+# joined with '_' and prefixed with 'CNS_', so 'scanner.timeout' becomes
+# CNS_SCANNER_TIMEOUT and 'serverinfo.token' becomes CNS_SERVERINFO_TOKEN.
+# Command line flags override environment variables, which override this file.
+#
+# Any value may be replaced by a secret reference:
+#   secret://name          -> read <secrets.dir>/name (Docker/Kubernetes secret)
+#   file:///path/to/file   -> read a file
+#   env://VARIABLE         -> read an environment variable
+#   exec://command         -> run a command (requires secrets.allow_exec)
+# Alternatively append '_file' to a key: 'token_file: /run/secrets/token'.
+
+# --- what to check -----------------------------------------------------------
+host: cloud.example.com          # comma separated list for several instances
+# proxy: http://proxy.example.com:3128
+timeout: 10
+retries: 2
+backoff_factor: 0.5
+
+warning: 3                       # rating <= 3 (C) -> WARNING
+critical: 1                      # rating <= 1 (E) -> CRITICAL
+check_hardening: true
+update_warning: false            # pending server update -> WARNING
+
+# --- where the checks run ----------------------------------------------------
+scan:
+  # 'remote' = Scan API (scan.nextcloud.com by default, or your own container
+  # via scan.url), 'local' = run the checks in this process.
+  backend: remote
+  # Point this at the local container to keep everything in your network:
+  # url: http://nextcloud-scanner:8080
+  # token: secret://scanner_token
+
+# --- the local scanner -------------------------------------------------------
+scanner:
+  timeout: 10
+  verify_tls: true
+  scheme: https                  # use http only for testing
+  # target_port: 8443
+  extra_checks: true             # TLS, exposed paths, WebDAV, modern headers
+  extra_checks_rating: true      # let failed extra checks lower the rating
+  tls_min_days: 14
+  use_updater_server: true       # only used when serverinfo is unavailable
+  use_release_schedule: true     # rate unsupported major releases as F (EOL)
+  # supported_majors: [34, 33, 32]   # override the bundled release schedule
+  bundled_db: true
+  # vulnerability_db:            # additional advisory files (JSON)
+  #   - /etc/check-nextcloud-security/advisories.json
+  # vulnerability_feed: https://api.github.com/advisories?ecosystem=composer&affects=nextcloud/server
+
+# --- the scan service inside the container -----------------------------------
+service:
+  listen: 0.0.0.0
+  port: 8080
+  cache_ttl: 900
+  # token: secret://scanner_token
+
+# --- update check via the local Nextcloud instance ---------------------------
+serverinfo:
+  # auto | api | occ | off. 'auto' uses the API when credentials are set and
+  # the occ command when one is configured; otherwise the check is skipped.
+  # Set 'off' (or pass --no-update-check / CNS_NO_UPDATE_CHECK=true) to disable
+  # the update check completely.
+  mode: auto
+  url: https://cloud.example.com
+  # Monitoring token of the serverinfo app:
+  #   occ config:app:set serverinfo token --value <token>
+  token: secret://serverinfo_token
+  # ... or admin credentials instead of the token:
+  # user: admin
+  # password_file: /run/secrets/nextcloud_admin_password
+  # Local command line access (used when mode is 'occ'):
+  # occ_command: php /var/www/html/occ
+  # container: nextcloud-app     # wraps the command in `docker exec`
+  # container_user: www-data
+  timeout: 10
+  occ_timeout: 60
+  verify_tls: true
+
+# --- notifications -----------------------------------------------------------
+webhook:
+  # url: https://hooks.example.com/nextcloud
+  on: critical                   # critical | warning | unknown | always
+  timeout: 10
+  # headers:
+  #   - "X-Auth-Token: secret://webhook_token"
+
+# --- secret provider ---------------------------------------------------------
+secrets:
+  dir: /run/secrets
+  allow_exec: false              # enable to use exec:// references
+  exec_timeout: 10

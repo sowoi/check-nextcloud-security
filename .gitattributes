@@ -1,4 +1,6 @@
+secrets/ export-ignore
 tests/ export-ignore
+scripts/ export-ignore
 .github/ export-ignore
 .gitattributes export-ignore
 .gitignore export-ignore

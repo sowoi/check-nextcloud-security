@@ -32,18 +32,20 @@ def test_main_calls_all_functions(mocker):
 
     cns.main()
 
-    expected_context = ScanContext(
-        host="nextcloud.example.com",
-        proxy=None,
-        debug=False,
-        rescan=False
-    )
+    mock_check_ip.assert_called_once()
+    context = mock_check_ip.call_args.args[1]
+    assert mock_check_ip.call_args.args[0] == "nextcloud.example.com"
+    assert isinstance(context, ScanContext)
+    assert context.host == "nextcloud.example.com"
+    assert context.proxy is None
+    assert context.debug is False
+    assert context.rescan is False
+    assert context.scan_backend == "remote"
 
-    mock_check_ip.assert_called_once_with("nextcloud.example.com")
-    mock_send_scan.assert_called_once_with(expected_context)
+    mock_send_scan.assert_called_once_with(context)
     mock_check_vuln.assert_called_once()
     call_args, call_kwargs = mock_check_vuln.call_args
-    assert call_args == (expected_context, mock_scan_result)
+    assert call_args == (context, mock_scan_result)
     assert isinstance(call_kwargs["duration_seconds"], float)
 
 

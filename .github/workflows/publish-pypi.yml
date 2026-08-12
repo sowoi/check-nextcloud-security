@@ -31,10 +31,38 @@ jobs:
         id: check_tag
         run: |
           if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "Tag v${{ steps.version.outputs.version }} existiert bereits. Überspringe Publish."
+            echo "Tag v${{ steps.version.outputs.version }} already exists. Skipping publish."
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The release schedule is scraped before the wheel is built so that the
+      # published package rates unsupported major releases as end of life.
+      # A layout change on the wiki must not block a release, hence
+      # --allow-failure: the previously committed file stays in place.
+      - name: Refresh supported Nextcloud versions
+        if: steps.check_tag.outputs.exists != 'true'
+        run: python scripts/update_supported_versions.py --allow-failure
+
+      # The version in pyproject.toml changed: write RELEASE.md and prepend the
+      # same entry to CHANGELOG.md. A section that is already documented in
+      # CHANGELOG.md is reused verbatim instead of being generated again.
+      - name: Update CHANGELOG.md and RELEASE.md
+        if: steps.check_tag.outputs.exists != 'true'
+        run: python scripts/release_notes.py --version "${{ steps.version.outputs.version }}"
+
+      - name: Commit release notes
+        if: steps.check_tag.outputs.exists != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md RELEASE.md nextcloud_local_scan/data/supported_versions.json
+          if git diff --cached --quiet; then
+            echo "Release notes are already up to date."
+          else
+            git commit -m "docs: release notes for v${{ steps.version.outputs.version }} [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
           fi
 
       - name: Build package
@@ -50,12 +78,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "v${{ steps.version.outputs.version }}"
           git push origin "v${{ steps.version.outputs.version }}"
 
+          # --notes-file provides the body, --generate-notes appends GitHub's
+          # own "What's Changed" section below it.
           gh release create "v${{ steps.version.outputs.version }}" \
             dist/* \
             --title "v${{ steps.version.outputs.version }}" \
+            --notes-file RELEASE.md \
             --generate-notes

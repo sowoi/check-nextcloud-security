@@ -1,0 +1,38 @@
+{
+    "domain": "uptodate.example.com",
+    "url": "https://uptodate.example.com/status.php",
+    "version": "34.0.2.1",
+    "product": "Nextcloud",
+    "edition": "",
+    "scannedAt": {
+        "date": "2026-07-27 13:01:40.000000",
+        "timezone_type": 3,
+        "timezone": "UTC"
+    },
+    "rating": 5,
+    "vulnerabilities": [],
+    "hardenings": {
+        "bruteforceProtection": true,
+        "CSPv3": true,
+        "sameSiteCookies": true,
+        "passwordConfirmation": true,
+        "__HostPrefix": true,
+        "appPasswordsCanBeRestricted": true,
+        "appPasswordsScannedForHaveIBeenPwned": true
+    },
+    "setup": {
+        "https": {
+            "enforced": true,
+            "used": true
+        },
+        "headers": {
+            "X-Frame-Options": true,
+            "X-Content-Type-Options": true,
+            "X-XSS-Protection": true,
+            "X-Download-Options": true,
+            "X-Permitted-Cross-Domain-Policies": true
+        }
+    },
+    "EOL": false,
+    "latestVersionInBranch": true
+}

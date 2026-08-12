@@ -1,0 +1,49 @@
+{
+    "domain": "vulnerable.example.com",
+    "url": "https://vulnerable.example.com/status.php",
+    "version": "26.0.1.1",
+    "product": "Nextcloud",
+    "edition": "",
+    "scannedAt": {
+        "date": "2026-08-07 06:28:56.000000",
+        "timezone_type": 3,
+        "timezone": "UTC"
+    },
+    "rating": 1,
+    "vulnerabilities": [
+        {
+            "id": "CVE-2023-28998",
+            "description": "Missing rate limiting on password reset.",
+            "cwe": "CWE-307"
+        },
+        {
+            "id": "CVE-2023-29003",
+            "description": "Improper access control in the files_sharing app.",
+            "cwe": "CWE-284"
+        }
+    ],
+    "hardenings": {
+        "bruteforceProtection": true,
+        "CSPv3": true,
+        "sameSiteCookies": true,
+        "passwordConfirmation": true,
+        "__HostPrefix": true,
+        "appPasswordsCanBeRestricted": true,
+        "appPasswordsScannedForHaveIBeenPwned": true
+    },
+    "setup": {
+        "https": {
+            "enforced": true,
+            "used": true
+        },
+        "headers": {
+            "X-Frame-Options": false,
+            "X-Content-Type-Options": false,
+            "X-XSS-Protection": false,
+            "X-Download-Options": true,
+            "X-Permitted-Cross-Domain-Policies": false
+        }
+    },
+    "EOL": false,
+    "latestVersionInBranch": false
+}

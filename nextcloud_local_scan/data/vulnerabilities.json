@@ -1,0 +1,19 @@
+{
+  "$schema": "https://github.com/sowoi/check-nextcloud-security/blob/main/nextcloud_local_scan/data/vulnerabilities.schema.json",
+  "updated": "2026-08-12",
+  "source": "bundled",
+  "comment": "Local advisory database used by the offline scanner. Entries are matched against the detected Nextcloud version using the half-open range [introduced, fixed). Ship your own entries here or point --vulnerability-feed at a JSON feed (GitHub Advisory API format is understood as well).",
+  "advisories": [
+    {
+      "id": "NC-EOL",
+      "cwe": "CWE-1104",
+      "title": "Unmaintained Nextcloud release",
+      "description": "The detected release no longer receives security fixes. This entry is reported by the scanner itself when the updater server or the local instance flags the version as end-of-life; it is listed here for documentation only and is never matched by version range.",
+      "severity": "critical",
+      "url": "https://github.com/nextcloud/server/wiki/Maintenance-and-Release-Schedule",
+      "introduced": null,
+      "fixed": null,
+      "enabled": false
+    }
+  ]
+}
