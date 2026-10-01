@@ -1,11 +1,11 @@
 {
   "_comment": "Supported Nextcloud major releases, extracted from the official maintenance and release schedule. Every major version below 'oldest_supported' is treated as end of life (rating F) by the local scanner. Regenerate with scripts/update_supported_versions.py.",
   "source": "https://github.com/nextcloud/server/wiki/Maintenance-and-Release-Schedule",
-  "updated": "2026-08-12",
+  "updated": "2026-10-01",
   "supported": [
+    35,
     34,
-    33,
-    32
+    33
   ],
-  "oldest_supported": 32
+  "oldest_supported": 33
 }
