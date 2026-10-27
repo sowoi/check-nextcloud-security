@@ -26,7 +26,7 @@ jobs:
         run: python scripts/update_supported_versions.py
 
       - name: Open pull request on change
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           add-paths: nextcloud_local_scan/data/supported_versions.json
           branch: chore/supported-versions
