@@ -29,7 +29,7 @@ import socket
 import ssl
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import requests
@@ -302,14 +302,14 @@ def _tls_findings(hostname: str, port: int, settings: ScannerSettings) -> list[F
     if isinstance(not_after, str):
         try:
             expires = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(
-                tzinfo=timezone.utc
+                tzinfo=UTC
             )
         except ValueError:
             findings.append(
                 Finding("tlsCertificate", "medium", False, f"Unparsable certificate date {not_after!r}")
             )
         else:
-            days_left = (expires - datetime.now(timezone.utc)).days
+            days_left = (expires - datetime.now(UTC)).days
             findings.append(
                 Finding(
                     "tlsCertificate",
@@ -684,7 +684,7 @@ def scan(
         settings=settings,
     )
 
-    scanned_at = datetime.now(timezone.utc)
+    scanned_at = datetime.now(UTC)
     result: dict[str, Any] = {
         "domain": hostname,
         "url": f"{base_url}/status.php",

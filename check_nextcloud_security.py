@@ -20,7 +20,7 @@ import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import IntEnum
 from typing import Any, NoReturn, TypeVar
 
@@ -565,7 +565,7 @@ def _build_base_payload(
     return {
         "plugin": "check-nextcloud-security",
         "plugin_version": __version__,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "host": context.host,
         "status": exit_code.name,
         "exit_code": int(exit_code),

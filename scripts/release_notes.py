@@ -20,10 +20,9 @@ import argparse
 import re
 import subprocess  # nosec B404 - fixed argv, no shell
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
 import tomllib
+from datetime import UTC, datetime
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
@@ -188,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     version = args.version or project_version()
-    released = args.date or datetime.now(tz=timezone.utc).date().isoformat()
+    released = args.date or datetime.now(tz=UTC).date().isoformat()
 
     body = existing_entry(version)
     reused = body is not None
