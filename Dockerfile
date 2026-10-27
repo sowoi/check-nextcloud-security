@@ -4,11 +4,11 @@
 # End users do not need Python, pip, or uv installed on the host -
 # only Docker. See README.md for usage examples.
 
-FROM python:3.13-slim AS builder
+FROM python:3.15-slim AS builder
 
 # uv is this project's dependency manager and build front end; the same
 # command is used in CI (see .github/workflows/publish-pypi.yml).
-COPY --from=ghcr.io/astral-sh/uv:0.11.31 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
 
 WORKDIR /src
 
@@ -20,14 +20,14 @@ COPY nextcloud_local_scan ./nextcloud_local_scan
 RUN uv build --wheel --out-dir /dist
 
 
-FROM python:3.13-slim
+FROM python:3.15-slim
 
 LABEL org.opencontainers.image.title="check-nextcloud-security" \
       org.opencontainers.image.description="Nagios/Icinga plugin and self-hosted scanner for Nextcloud instances (scan.nextcloud.com compatible)" \
       org.opencontainers.image.source="https://github.com/sowoi/check-nextcloud-security" \
       org.opencontainers.image.licenses="GPL-3.0-only"
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.31 /uv /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /bin/
 COPY --from=builder /dist/*.whl /tmp/
 
 # Dependencies are resolved from the wheel metadata (pyproject.toml);

@@ -23,7 +23,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -107,7 +107,7 @@ def build_document(versions: list[int], source: str) -> dict[str, Any]:
             "local scanner. Regenerate with scripts/update_supported_versions.py."
         ),
         "source": source,
-        "updated": datetime.now(tz=timezone.utc).date().isoformat(),
+        "updated": datetime.now(tz=UTC).date().isoformat(),
         "supported": versions,
         "oldest_supported": min(versions),
     }

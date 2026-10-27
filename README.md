@@ -98,7 +98,7 @@ For a permanent setup (Icinga2, systemd timer, cron, Docker, ...) see
 
 
 # Prerequisites
-- Python 3.10 or newer - or Docker, if you prefer the containerised route.
+- Python 3.11 or newer - or Docker, if you prefer the containerised route.
 - `requests` and `PyYAML`, installed automatically by pipx/uv/pip.
 
 # Installation
