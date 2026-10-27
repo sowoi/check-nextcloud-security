@@ -9,19 +9,21 @@ New entries are added on top by the release workflow whenever the version in
 `pyproject.toml` changes; the same entry is written to `RELEASE.md` and used as
 the body of the GitHub release.
 
-## [1.4.1] - 2026-10-27
+## [1.5.0] - 2026-10-27
 
 ### Added
 
 - **Python 3.15 support.** The test matrix, mypy configuration and the Docker
   image now cover Python 3.15.
-- **CI.** The Python version check runs as a parallel matrix (3.10 to 3.15),
+- **CI.** The Python version check runs as a parallel matrix (3.11 to 3.15),
   `uv lock --check` guards `uv.lock`, and a new `docker build` workflow builds
   the image and smoke-tests the plugin and the scanner health probe.
   Dependabot now also updates Docker images and GitHub Actions.
 
 ### Changed
 
+- **Python 3.10 is no longer supported** (end of life); the minimum is now
+  Python 3.11.
 - **Docker image runs on Python 3.15 by default** (`python:3.15-slim`) and uses
   uv 0.13.6.
 - **Dependencies updated** to the latest releases: `certifi`, `types-requests`,

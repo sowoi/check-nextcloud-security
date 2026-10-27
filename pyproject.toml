@@ -1,9 +1,9 @@
 [project]
 name = "check-nextcloud-security"
-version = "1.4.1"
+version = "1.5.0"
 description = "Check the security level of your Nextcloud instance - via scan.nextcloud.com or a self-hosted local scanner"
 authors = [{ name = "Massoud Ahmed" }, { name = "Georg Schlagholz"}]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 readme = "README.md"
 license = { file = "LICENSE" }
 dependencies = [
