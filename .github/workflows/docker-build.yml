@@ -1,0 +1,41 @@
+name: docker build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: image
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build image
+        run: docker build -t check-nextcloud-security:ci .
+
+      - name: Image runs on Python 3.15
+        run: |
+          docker run --rm --entrypoint python check-nextcloud-security:ci --version \
+            | grep -q "^Python 3\.15\."
+
+      - name: Plugin starts
+        run: docker run --rm check-nextcloud-security:ci --help
+
+      - name: Scanner starts and answers the health probe
+        run: |
+          docker run -d --name scanner -p 8080:8080 \
+            -e CNS_SERVICE_LISTEN=0.0.0.0 \
+            --entrypoint check-nextcloud-scanner \
+            check-nextcloud-security:ci serve
+          for i in $(seq 1 15); do
+            curl -fsS http://127.0.0.1:8080/healthz && exit 0
+            sleep 1
+          done
+          docker logs scanner
+          exit 1

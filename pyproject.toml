@@ -1,15 +1,15 @@
 [project]
 name = "check-nextcloud-security"
-version = "1.4.0"
+version = "1.4.1"
 description = "Check the security level of your Nextcloud instance - via scan.nextcloud.com or a self-hosted local scanner"
 authors = [{ name = "Massoud Ahmed" }, { name = "Georg Schlagholz"}]
 requires-python = ">=3.10"
 readme = "README.md"
 license = { file = "LICENSE" }
 dependencies = [
-    "certifi>=2026.7.22",
+    "certifi>=2026.10.23",
     "requests>=2.34.2",
-    "types-requests>=2.33.0.20260712",
+    "types-requests>=2.33.0.20261006",
     "PyYAML>=6.0.3",
 ]
 
@@ -42,10 +42,10 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 test = [
-    "mypy>=2.2.0",
-    "nox>=2026.4.10",
+    "mypy>=2.4.0",
+    "nox>=2026.10.20",
     "pytest>=9.1.1",
-    "pytest-mock>=3.15.1",
+    "pytest-mock>=3.17.0",
 ]
 
 [tool.pytest.ini_options]

@@ -175,7 +175,6 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
-/uv.lock
 /.nox
 /.mypy_cache
 # Local secret files for docker-compose (only the *.example files are tracked)

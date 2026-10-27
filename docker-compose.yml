@@ -18,6 +18,14 @@ services:
     entrypoint: ["check-nextcloud-scanner"]
     command: ["serve"]
     restart: unless-stopped
+    # Hardening: the service needs no privileges and writes nothing to disk.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "127.0.0.1:8080:8080"
     environment:
@@ -51,6 +59,14 @@ services:
     depends_on:
       scanner:
         condition: service_healthy
+    # Hardening: the service needs no privileges and writes nothing to disk.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       CNS_HOST: "cloud.example.com"
       # Use the local container instead of scan.nextcloud.com.
