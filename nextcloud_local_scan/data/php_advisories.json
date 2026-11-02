@@ -1,0 +1,29 @@
+{
+  "_comment": "Curated by hand. 'fixed' maps every PHP branch that received an official release to the first fixed version; branches below the oldest listed branch are treated as affected without an upstream fix. 'eol' lists the date after which the PHP project no longer ships security fixes for a branch.",
+  "updated": "2026-11-02",
+  "eol": {
+    "7.4": "2022-11-28",
+    "8.0": "2023-11-26",
+    "8.1": "2025-12-31",
+    "8.2": "2026-12-31",
+    "8.3": "2027-12-31",
+    "8.4": "2028-12-31",
+    "8.5": "2029-12-31"
+  },
+  "advisories": [
+    {
+      "id": "PHP2Shell",
+      "cves": ["CVE-2026-109618", "CVE-2026-109619"],
+      "severity": "critical",
+      "published": "2026-10-21",
+      "summary": "Unauthenticated remote code execution in the PHP request handling",
+      "url": "https://www.php.net/archive/2026.php#2026-10-21-5",
+      "fixed": {
+        "8.2": "8.2.35",
+        "8.3": "8.3.36",
+        "8.4": "8.4.27",
+        "8.5": "8.5.12"
+      }
+    }
+  ]
+}

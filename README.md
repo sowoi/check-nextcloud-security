@@ -22,6 +22,7 @@
   * [What the local scanner checks](#what-the-local-scanner-checks)
   * [Advisory database](#advisory-database)
 * [Update check via the local instance (`serverinfo`)](#update-check-via-the-local-instance-serverinfo)
+* [PHP version check](#php-version-check)
 * [Configuration file and secrets](#configuration-file-and-secrets)
 * [Rating thresholds](#rating-thresholds)
 * [Hardening checks](#hardening-checks)
@@ -85,6 +86,8 @@ For a permanent setup (Icinga2, systemd timer, cron, Docker, ...) see
   listings, unauthenticated WebDAV, modern security headers
 - **Update check against the local instance** via the Nextcloud `serverinfo`
   app - no dependency on an external service
+- **PHP version check** against known critical PHP advisories such as
+  PHP2Shell (CVE-2026-109618 / CVE-2026-109619)
 - Configuration from a YAML file, environment variables or a secret provider
   (Docker/Kubernetes secrets, files, environment, commands)
 - Standard Nagios/Icinga exit codes (OK, WARNING, CRITICAL, UNKNOWN) and
@@ -392,6 +395,8 @@ check-nextcloud-security --host <Hostname> --rescan
 | `--serverinfo-container` | Run `occ` inside this container via `docker exec` | *None*       | `CNS_SERVERINFO_CONTAINER` |
 | `--no-update-check` | Disable the update check against the local instance    | *False*      | `CNS_NO_UPDATE_CHECK` |
 | `--update-warning`  | Report WARNING when a server update is pending         | *False*      | `CNS_UPDATE_WARNING`  |
+| `--no-php-check`    | Do not check the PHP version against PHP advisories    | *False*      | `CNS_NO_PHP_CHECK`    |
+| `--php-ignore ID`   | Acknowledge a PHP advisory (repeatable)                | -            | `CNS_PHP_IGNORE`      |
 | `-V, --version`     | Show the installed version and exit                    | —            | —                     |
 | `-h, --help`        | Show help and exit                                     | —            | —                     |
 
@@ -658,6 +663,59 @@ an extra output line and as the `update_available` performance metric; with
 `--update-warning` a pending server update turns an otherwise `OK` result
 into `WARNING`. A failing update check never aborts the security check.
 
+# PHP version check
+The PHP interpreter is part of the attack surface of every Nextcloud instance.
+When the PHP version is known, it is compared with a curated list of critical
+PHP advisories bundled with the plugin
+(`nextcloud_local_scan/data/php_advisories.json`). The list is not fetched
+at runtime. It currently covers:
+
+| Advisory  | CVEs                             | Fixed in                              |
+|-----------|----------------------------------|---------------------------------------|
+| PHP2Shell | CVE-2026-109618, CVE-2026-109619 | 8.2.35, 8.3.36, 8.4.27, 8.5.12        |
+
+The PHP version comes from the same `serverinfo` lookup as the
+[update check](#update-check-via-the-local-instance-serverinfo), so **that
+lookup has to be configured**. Without it the output says
+`PHP check: version not available` and the state is not changed. With
+`--no-update-check` the PHP check is skipped too.
+
+- **`api`** reports the version of the PHP that actually serves web requests
+  (PHP-FPM / mod_php). This is the preferred source: it also notices a PHP
+  package that was upgraded while the FPM workers still run the old binary.
+- **`occ`** can only see the command line PHP (`php -r 'echo PHP_VERSION;'`,
+  inside the container if one is configured). That may differ from PHP-FPM,
+  and the output says so.
+
+Resulting states:
+
+| Finding                                                         | State    |
+|-----------------------------------------------------------------|----------|
+| PHP version affected by a listed advisory                       | CRITICAL |
+| Branch without an upstream fix (e.g. PHP 8.1 and older)         | CRITICAL |
+| Debian/Ubuntu build (`8.1.2-1ubuntu2.14`, CLI only) affected    | WARNING  |
+| PHP branch end of life, no listed advisory                      | WARNING  |
+| PHP version not affected                                        | OK       |
+
+A PHP finding only ever raises the state, never lowers it.
+
+**Distribution backports.** Debian, Ubuntu, RHEL, AlmaLinux and others ship
+security fixes without changing the upstream version number. The serverinfo
+API only reports `major.minor.patch`, so such a patched system still looks
+affected. Once you have verified the vendor fix, acknowledge the advisory:
+
+```shell
+check-nextcloud-security --host nextcloud.example.com --php-ignore PHP2Shell
+# or: CNS_PHP_IGNORE=PHP2Shell, or 'php_ignore: [PHP2Shell]' in the config file
+```
+
+CVE numbers work as well (`--php-ignore CVE-2026-109618`).
+
+> **Not covered:** CVE-2026-115560 has no fixed release yet. PHP recommends
+> `session.upload_progress.enabled=0` (set in `php.ini` or the FPM pool, then
+> restart all workers). serverinfo does not expose that setting, so the
+> plugin cannot verify it.
+
 # Configuration file and secrets
 All settings can live in a YAML file instead of the command line. It is read
 from `--config`, `CNS_CONFIG_FILE`, `./check-nextcloud-security.yml` or
@@ -871,6 +929,7 @@ rating=5;;;0;5 vulnerabilities=0;;;0; time=1.234s;;;0;
 | `hardenings_missing` | Missing hardening measures (only with `--check-hardening`)     |
 | `extra_checks_failed` | Failed additional checks (local scanner only)                |
 | `update_available` | `1` when the local instance announces a pending server update   |
+| `php_advisories`   | Number of critical PHP advisories affecting the PHP version     |
 
 
 # Rescan

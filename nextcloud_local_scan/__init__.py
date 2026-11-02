@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from .config import Configuration, ConfigurationError, load_configuration
 from .factory import scanner_settings_from_config, serverinfo_settings_from_config
+from .php import PhpAssessment, assess_php_version
 from .scanner import ScanError, ScannerSettings, failed_extra_checks, scan
 from .secrets import SecretProvider, SecretResolutionError
 from .serverinfo import ServerInfoSettings, UpdateInfo, fetch_update_info
@@ -27,6 +28,7 @@ from .vulndb import VulnerabilityDatabase, load_database
 __all__ = [
     "Configuration",
     "ConfigurationError",
+    "PhpAssessment",
     "ScanError",
     "ScanStore",
     "ScannerSettings",
@@ -35,6 +37,7 @@ __all__ = [
     "ServerInfoSettings",
     "UpdateInfo",
     "VulnerabilityDatabase",
+    "assess_php_version",
     "build_server",
     "failed_extra_checks",
     "fetch_update_info",

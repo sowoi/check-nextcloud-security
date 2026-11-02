@@ -6,9 +6,12 @@ import requests
 
 from nextcloud_local_scan.serverinfo import (
     ServerInfoSettings,
+    _fetch_cli_php_version,
     _occ_argv,
     _parse_api_payload,
+    _parse_occ_serverinfo,
     _parse_occ_update_check,
+    _php_argv,
     fetch_update_info,
 )
 
@@ -157,6 +160,9 @@ def test_occ_transport_falls_back_to_update_check(mocker):
         return 0, "Nextcloud 30.0.4 is available.\n", ""
 
     mocker.patch("nextcloud_local_scan.serverinfo._run_occ", side_effect=_fake_run)
+    mocker.patch(
+        "nextcloud_local_scan.serverinfo._fetch_cli_php_version", return_value="8.3.36"
+    )
     settings = ServerInfoSettings(mode="occ", occ_command="occ")
 
     info = fetch_update_info(settings)
@@ -164,3 +170,81 @@ def test_occ_transport_falls_back_to_update_check(mocker):
     assert calls == [["serverinfo", "--output=json"], ["update:check"]]
     assert info.available is True
     assert info.available_version == "30.0.4"
+    assert info.php_version == "8.3.36"
+    assert info.php_source == "cli"
+
+
+def test_api_payload_carries_the_php_version():
+    """serverinfo reports the PHP of the web SAPI under server.php.version."""
+    payload = {"ocs": {"data": {**API_PAYLOAD["ocs"]["data"], "server": {"php": {"version": "8.3.12"}}}}}
+
+    info = _parse_api_payload(payload)
+
+    assert info.php_version == "8.3.12"
+    assert info.php_source == "api"
+    assert info.as_dict()["phpVersion"] == "8.3.12"
+
+
+def test_api_payload_without_php_block_leaves_the_version_unknown():
+    info = _parse_api_payload(API_PAYLOAD)
+
+    assert info.php_version is None
+    assert info.as_dict()["phpVersion"] is None
+
+
+def test_occ_serverinfo_php_version_is_labelled_cli():
+    document = (
+        '{"nextcloud": {"system": {"version": "31.0.9", "update": {"available": false}}},'
+        ' "server": {"php": {"version": "8.4.27"}}}'
+    )
+
+    info = _parse_occ_serverinfo(document)
+
+    assert info is not None
+    assert info.php_version == "8.4.27"
+    assert info.php_source == "occ (cli)"
+
+
+def test_php_argv_reuses_the_php_binary_of_the_occ_command():
+    settings = ServerInfoSettings(occ_command="/usr/bin/php8.3 /var/www/html/occ")
+    assert _php_argv(settings) == ["/usr/bin/php8.3", "-r", "echo PHP_VERSION;"]
+
+    settings = ServerInfoSettings(occ_command="occ", container="nextcloud-app")
+    assert _php_argv(settings) == [
+        "docker", "exec", "-u", "www-data", "nextcloud-app", "php", "-r", "echo PHP_VERSION;",
+    ]
+
+
+def test_cli_php_version_rejects_garbage(mocker):
+    completed = MagicMock(returncode=0, stdout="Could not open input file\n")
+    mocker.patch("nextcloud_local_scan.serverinfo.subprocess.run", return_value=completed)
+
+    assert _fetch_cli_php_version(ServerInfoSettings()) is None
+
+    completed.stdout = "8.1.2-1ubuntu2.14\n"
+    assert _fetch_cli_php_version(ServerInfoSettings()) == "8.1.2-1ubuntu2.14"
+
+
+def test_api_php_version_survives_the_occ_fallback(mocker):
+    """When the API lacks the update block, occ supplies it but the API PHP wins."""
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        "ocs": {"data": {"nextcloud": {"system": {"version": "31.0.9"}},
+                         "server": {"php": {"version": "8.3.12"}}}}
+    }
+    mocker.patch("nextcloud_local_scan.serverinfo.requests.get", return_value=response)
+    mocker.patch(
+        "nextcloud_local_scan.serverinfo._run_occ",
+        side_effect=lambda s, a: (1, "", "") if a[0] == "serverinfo" else (0, "", ""),
+    )
+    mocker.patch(
+        "nextcloud_local_scan.serverinfo._fetch_cli_php_version", return_value="8.3.36"
+    )
+    settings = ServerInfoSettings(url="https://cloud.example.com", token="t", occ_configured=True)
+
+    info = fetch_update_info(settings, "cloud.example.com")
+
+    assert info.source == "occ update:check"
+    assert info.php_version == "8.3.12"
+    assert info.php_source == "api"

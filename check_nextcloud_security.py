@@ -40,6 +40,13 @@ from nextcloud_local_scan import (
     serverinfo_settings_from_config,
 )
 from nextcloud_local_scan import scan as local_scan
+from nextcloud_local_scan.php import (
+    STATUS_EOL,
+    STATUS_VENDOR_BUILD,
+    STATUS_VULNERABLE,
+    PhpAssessment,
+    assess_php_version,
+)
 from nextcloud_local_scan.serverinfo import MODES as SERVERINFO_MODES
 
 __version__ = "1.4.0"
@@ -135,6 +142,9 @@ class ScanContext:
     serverinfo_settings: ServerInfoSettings | None = None
     update_check: bool = True
     update_warning: bool = False
+    # PHP version check, based on the version reported by serverinfo.
+    php_check: bool = True
+    php_ignore: tuple[str, ...] = ()
 
     @property
     def queue_url(self) -> str:
@@ -488,6 +498,11 @@ def check_vulnerabilities(
             )
             exit_code = NagiosExitCode.WARNING
 
+    php_assessment = _resolve_php_assessment(context, update_info)
+    if php_assessment is not None:
+        detail_lines.append(php_assessment.summary())
+        msg, exit_code = _apply_php_assessment(php_assessment, msg, exit_code)
+
     perfdata = _build_perfdata(
         rating,
         RATE_MAP,
@@ -497,6 +512,11 @@ def check_vulnerabilities(
         missing_hardenings=len(missing_hardenings) if context.check_hardening else None,
         failed_extra_checks_count=len(extra_failures) if response_scan.get("extraChecks") else None,
         update_available=update_info.available if update_info is not None else None,
+        php_advisories=(
+            len(php_assessment.advisories)
+            if php_assessment is not None and php_assessment.known
+            else None
+        ),
     )
 
     if _webhook_should_fire(context, exit_code):
@@ -513,6 +533,7 @@ def check_vulnerabilities(
             duration_seconds=duration_seconds,
             update_info=update_info,
             extra_failures=extra_failures,
+            php_assessment=php_assessment,
         )
         if not _send_webhook(context, payload):
             detail_lines.append("Webhook delivery failed (see debug log)")
@@ -543,12 +564,53 @@ def _resolve_update_info(
             last_checked_at=embedded.get("lastCheckedAt"),
             source=str(embedded.get("source") or "unknown"),
             error=embedded.get("error"),
+            # Absent in answers of older scanner containers: stays unknown.
+            php_version=embedded.get("phpVersion"),
+            php_source=embedded.get("phpSource"),
         )
 
     settings = context.serverinfo_settings
     if settings is None or settings.effective_mode() == "off":
         return None
     return fetch_update_info(settings, context.host)
+
+
+def _resolve_php_assessment(
+    context: ScanContext, update_info: UpdateInfo | None
+) -> PhpAssessment | None:
+    """Assess the PHP version reported by serverinfo, if the check is enabled."""
+    if not context.php_check:
+        return None
+    php_version = update_info.php_version if update_info is not None else None
+    php_source = update_info.php_source if update_info is not None else None
+    return assess_php_version(php_version, php_source, ignore=context.php_ignore)
+
+
+def _apply_php_assessment(
+    assessment: PhpAssessment, msg: str, exit_code: NagiosExitCode
+) -> tuple[str, NagiosExitCode]:
+    """
+    Raise the state according to the PHP verdict; never lower it.
+
+    A PHP version with a known critical advisory is CRITICAL, a distribution
+    build that may carry a backport and an end-of-life branch are WARNING.
+    """
+    if assessment.status == STATUS_VULNERABLE:
+        if exit_code is NagiosExitCode.CRITICAL:
+            return msg, exit_code
+        labels = ", ".join(match.label() for match in assessment.advisories)
+        return (
+            f"CRITICAL: PHP {assessment.version} is affected by {labels}.",
+            NagiosExitCode.CRITICAL,
+        )
+    if assessment.status in (STATUS_VENDOR_BUILD, STATUS_EOL) and exit_code is NagiosExitCode.OK:
+        if assessment.status == STATUS_VENDOR_BUILD:
+            labels = ", ".join(match.label() for match in assessment.advisories)
+            reason = f"may be affected by {labels} (distribution build, verify backport)"
+        else:
+            reason = f"runs on an end-of-life branch (since {assessment.eol_date})"
+        return f"WARNING: PHP {assessment.version} {reason}.", NagiosExitCode.WARNING
+    return msg, exit_code
 
 
 def _webhook_should_fire(context: ScanContext, exit_code: NagiosExitCode) -> bool:
@@ -587,6 +649,7 @@ def _build_webhook_payload(
     duration_seconds: float | None,
     update_info: UpdateInfo | None = None,
     extra_failures: list[str] | None = None,
+    php_assessment: PhpAssessment | None = None,
 ) -> dict[str, Any]:
     """
     Build the JSON document posted to the webhook.
@@ -614,6 +677,7 @@ def _build_webhook_payload(
         "scan_url": context.result_url_for(scan_result.uuid),
         "scan_uuid": scan_result.uuid,
         "update": update_info.as_dict() if update_info is not None else None,
+        "php": php_assessment.as_dict() if php_assessment is not None else None,
         "duration_seconds": round(duration_seconds, 3) if duration_seconds is not None else None,
     }
 
@@ -789,6 +853,7 @@ def _build_perfdata(
     missing_hardenings: int | None = None,
     failed_extra_checks_count: int | None = None,
     update_available: bool | None = None,
+    php_advisories: int | None = None,
 ) -> str:
     """
     Build a Nagios/Icinga performance data string.
@@ -816,6 +881,8 @@ def _build_perfdata(
         parts.append(f"extra_checks_failed={failed_extra_checks_count};;;0;")
     if update_available is not None:
         parts.append(f"update_available={int(update_available)};;;0;1")
+    if php_advisories is not None:
+        parts.append(f"php_advisories={php_advisories};;;0;")
     return " ".join(parts)
 
 
@@ -996,6 +1063,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-php-check",
+        action="store_true",
+        default=_env_bool("NO_PHP_CHECK"),
+        help=(
+            "Do not compare the PHP version reported by serverinfo with known "
+            f"critical PHP advisories. Default: False (env: {ENV_PREFIX}NO_PHP_CHECK)."
+        ),
+    )
+    parser.add_argument(
+        "--php-ignore",
+        action="append",
+        default=None,
+        metavar="ID",
+        help=(
+            "Acknowledge a PHP advisory (id such as 'PHP2Shell' or a CVE number), "
+            "e.g. because the distribution backported the fix without changing "
+            "the version. May be given multiple times "
+            f"(env: {ENV_PREFIX}PHP_IGNORE, entries separated by ',' or ';')."
+        ),
+    )
+    parser.add_argument(
         "-r",
         "--rescan",
         action="store_true",
@@ -1127,6 +1215,18 @@ def _parse_webhook_headers(raw_headers: list[str] | None) -> tuple[tuple[str, st
     return tuple(headers)
 
 
+def _parse_php_ignore(raw: list[str] | None) -> tuple[str, ...]:
+    """Collect acknowledged PHP advisories from the CLI or CNS_PHP_IGNORE."""
+    entries = raw
+    if entries is None:
+        env_value = _env("PHP_IGNORE")
+        entries = [env_value] if env_value else []
+    items: list[str] = []
+    for entry in entries:
+        items.extend(part.strip() for part in entry.replace(";", ",").split(","))
+    return tuple(item for item in items if item)
+
+
 def _validate_thresholds(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Reject rating thresholds outside 0-5 or with critical above warning."""
     for name in ("warning", "critical"):
@@ -1229,6 +1329,8 @@ def _build_context(host: str, args: argparse.Namespace) -> ScanContext:
         serverinfo_settings=serverinfo_settings,
         update_check=not args.no_update_check,
         update_warning=args.update_warning,
+        php_check=not args.no_php_check,
+        php_ignore=_parse_php_ignore(args.php_ignore),
     )
 
 
