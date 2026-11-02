@@ -59,6 +59,10 @@ class UpdateInfo:
     last_checked_at: int | None = None
     source: str = "none"
     error: str | None = None
+    # PHP version of the instance and where it came from: 'api' is the
+    # interpreter serving web requests, 'cli' the command line binary.
+    php_version: str | None = None
+    php_source: str | None = None
 
     @property
     def known(self) -> bool:
@@ -75,6 +79,8 @@ class UpdateInfo:
             "lastCheckedAt": self.last_checked_at,
             "source": self.source,
             "error": self.error,
+            "phpVersion": self.php_version,
+            "phpSource": self.php_source,
         }
 
     def summary(self) -> str:
@@ -184,6 +190,11 @@ def _parse_api_payload(payload: dict[str, Any]) -> UpdateInfo:
         if isinstance(app_updates, dict):
             info.app_updates = {str(name): str(version) for name, version in app_updates.items()}
 
+    php_version = _dig(payload, "ocs", "data", "server", "php", "version")
+    if isinstance(php_version, str) and php_version.strip():
+        info.php_version = php_version.strip()
+        info.php_source = "api"
+
     return info
 
 
@@ -274,8 +285,17 @@ def _parse_occ_serverinfo(stdout: str) -> UpdateInfo | None:
     if system is None:
         return None
 
-    info = _parse_api_payload({"ocs": {"data": {"nextcloud": {"system": system}}}})
+    server = _dig(document, "ocs", "data", "server")
+    if server is None:
+        server = document.get("server")
+    data: dict[str, Any] = {"nextcloud": {"system": system}}
+    if isinstance(server, dict):
+        data["server"] = server
+    info = _parse_api_payload({"ocs": {"data": data}})
     info.source = "occ serverinfo"
+    if info.php_version:
+        # occ runs on the command line interpreter, not on PHP-FPM.
+        info.php_source = "occ (cli)"
     return info
 
 
@@ -294,8 +314,63 @@ def _parse_occ_update_check(stdout: str) -> UpdateInfo:
     return info
 
 
+def _php_argv(settings: ServerInfoSettings) -> list[str]:
+    """
+    Build the argv that prints the command line PHP version.
+
+    When the occ command is started through a PHP binary
+    ('php8.3 /var/www/html/occ') that binary is used, otherwise plain 'php'.
+    """
+    occ = shlex.split(settings.occ_command)
+    binary = occ[0] if occ and occ[0].rsplit("/", 1)[-1].startswith("php") else "php"
+    argv = [binary, "-r", "echo PHP_VERSION;"]
+    if settings.container:
+        prefix = shlex.split(settings.docker_command) + ["exec"]
+        if settings.container_user:
+            prefix += ["-u", settings.container_user]
+        prefix.append(settings.container)
+        argv = prefix + argv
+    return argv
+
+
+_PHP_VERSION_OUTPUT = re.compile(r"^\d+\.\d+\.\d+\S*$")
+
+
+def _fetch_cli_php_version(settings: ServerInfoSettings) -> str | None:
+    """Return PHP_VERSION of the command line interpreter, or None."""
+    argv = _php_argv(settings)
+    LOGGER.debug("Running %s", " ".join(argv))
+    try:
+        completed = subprocess.run(  # nosec B603 - argv built from configuration, no shell
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=settings.occ_timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        LOGGER.debug("Could not determine the PHP version: %s", exc)
+        return None
+    output = completed.stdout.strip()
+    if completed.returncode != 0 or not _PHP_VERSION_OUTPUT.match(output):
+        LOGGER.debug("Unexpected PHP version output (exit %s): %r", completed.returncode, output)
+        return None
+    return output
+
+
 def _fetch_via_occ(settings: ServerInfoSettings) -> UpdateInfo:
     """Ask the local instance through its command line interface."""
+    info = _fetch_occ_update_state(settings)
+    if not info.php_version:
+        php_version = _fetch_cli_php_version(settings)
+        if php_version:
+            info.php_version = php_version
+            info.php_source = "cli"
+    return info
+
+
+def _fetch_occ_update_state(settings: ServerInfoSettings) -> UpdateInfo:
+    """Update state via `occ serverinfo`, falling back to `occ update:check`."""
     code, stdout, stderr = _run_occ(settings, ["serverinfo", "--output=json"])
     if code == 0:
         parsed = _parse_occ_serverinfo(stdout)
@@ -331,7 +406,12 @@ def fetch_update_info(settings: ServerInfoSettings, host: str | None = None) -> 
             return info
         LOGGER.debug("serverinfo API unusable (%s), trying occ", info.error)
         fallback = _fetch_via_occ(settings)
-        return fallback if fallback.known else info
+        if not fallback.known:
+            return info
+        if info.php_version:
+            # The API reports the PHP that serves web requests; prefer it.
+            fallback.php_version, fallback.php_source = info.php_version, info.php_source
+        return fallback
 
     info = _fetch_via_occ(settings)
     if not info.known and settings.mode == "auto" and settings.has_api_credentials:

@@ -28,6 +28,8 @@ warning: 3                       # rating <= 3 (C) -> WARNING
 critical: 1                      # rating <= 1 (E) -> CRITICAL
 check_hardening: true
 update_warning: false            # pending server update -> WARNING
+# no_php_check: false            # PHP version vs. known critical PHP advisories
+# php_ignore: [PHP2Shell]        # acknowledge after verifying a distro backport
 
 # --- where the checks run ----------------------------------------------------
 scan:
