@@ -49,7 +49,7 @@ from nextcloud_local_scan.php import (
 )
 from nextcloud_local_scan.serverinfo import MODES as SERVERINFO_MODES
 
-__version__ = "1.4.0"
+__version__ = "1.6.0"
 
 LOGGER = logging.getLogger("check_nextcloud")
 
