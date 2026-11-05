@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   id-token: write
+  pull-requests: write
 
 jobs:
   publish:
@@ -45,25 +46,12 @@ jobs:
         if: steps.check_tag.outputs.exists != 'true'
         run: python scripts/update_supported_versions.py --allow-failure
 
-      # The version in pyproject.toml changed: write RELEASE.md and prepend the
-      # same entry to CHANGELOG.md. A section that is already documented in
-      # CHANGELOG.md is reused verbatim instead of being generated again.
+      # The release notes are committed in the release pull request by the
+      # release-notes workflow. They are generated again here so that the
+      # GitHub release body is always right, even if that step was skipped.
       - name: Update CHANGELOG.md and RELEASE.md
         if: steps.check_tag.outputs.exists != 'true'
         run: python scripts/release_notes.py --version "${{ steps.version.outputs.version }}"
-
-      - name: Commit release notes
-        if: steps.check_tag.outputs.exists != 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md RELEASE.md nextcloud_local_scan/data/supported_versions.json
-          if git diff --cached --quiet; then
-            echo "Release notes are already up to date."
-          else
-            git commit -m "docs: release notes for v${{ steps.version.outputs.version }} [skip ci]"
-            git push origin HEAD:${{ github.ref_name }}
-          fi
 
       - name: Build package
         if: steps.check_tag.outputs.exists != 'true'
@@ -88,3 +76,22 @@ jobs:
             --title "v${{ steps.version.outputs.version }}" \
             --notes-file RELEASE.md \
             --generate-notes
+
+      # main is protected, so nothing is pushed here. Should the generated
+      # files differ from main, a follow-up pull request is opened after the
+      # release instead of failing it.
+      - name: Open pull request for missing release notes
+        if: steps.check_tag.outputs.exists != 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          add-paths: |
+            CHANGELOG.md
+            RELEASE.md
+            nextcloud_local_scan/data/supported_versions.json
+          branch: docs/release-notes-v${{ steps.version.outputs.version }}
+          commit-message: "docs: release notes for v${{ steps.version.outputs.version }}"
+          title: "docs: release notes for v${{ steps.version.outputs.version }}"
+          body: |
+            The release pull request for v${{ steps.version.outputs.version }} did not contain
+            up-to-date release notes. This commits the files the release was built with.
+          delete-branch: true

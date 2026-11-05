@@ -1,0 +1,83 @@
+name: Release notes
+
+# main is protected, so the publish workflow cannot commit the release notes
+# after the merge. Instead they are written into the release pull request:
+# as soon as a pull request carries a version without a tag, this workflow
+# runs scripts/release_notes.py (and refreshes the supported Nextcloud
+# versions) and pushes the result to the pull request branch. It runs again on
+# every push, so RELEASE.md follows later edits of the CHANGELOG.md section.
+#
+# Commits pushed with GITHUB_TOKEN do not trigger workflows, so this cannot
+# loop.
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-notes-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-notes:
+    name: Update release notes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pull request branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+
+      - name: Read version
+        id: version
+        run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check_tag
+        run: |
+          git fetch --tags --force origin >/dev/null 2>&1 || true
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "Version ${{ steps.version.outputs.version }} is already released; nothing to do."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refresh supported Nextcloud versions
+        if: steps.check_tag.outputs.exists != 'true'
+        run: python scripts/update_supported_versions.py --allow-failure
+
+      - name: Update CHANGELOG.md and RELEASE.md
+        if: steps.check_tag.outputs.exists != 'true'
+        run: python scripts/release_notes.py --version "${{ steps.version.outputs.version }}"
+
+      - name: Commit release notes to the pull request
+        if: steps.check_tag.outputs.exists != 'true'
+        env:
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          HEAD_REF: ${{ github.head_ref }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git add CHANGELOG.md RELEASE.md nextcloud_local_scan/data/supported_versions.json
+          if git diff --cached --quiet; then
+            echo "Release notes are up to date."
+            exit 0
+          fi
+          if [ "$SAME_REPO" != "true" ]; then
+            git diff --cached --stat
+            echo "::error::Release notes are out of date. Run 'python scripts/release_notes.py' and commit CHANGELOG.md and RELEASE.md."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs: release notes for v${VERSION}"
+          git push origin "HEAD:${HEAD_REF}"

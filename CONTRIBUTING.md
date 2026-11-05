@@ -99,18 +99,24 @@ uvx ruff check
 ```
 
 ## Releasing
-Releases are driven entirely by the `version` field in `pyproject.toml`. Once a
-change of that field lands on `main`, the
-[publish workflow](.github/workflows/publish-pypi.yml) takes over:
+Releases are driven entirely by the `version` field in `pyproject.toml`.
 
-1. `scripts/release_notes.py` writes the notes of the new version to
-   `RELEASE.md` (overwritten on every release) and prepends the same entry to
-   the top of [`CHANGELOG.md`](CHANGELOG.md).
-2. Both files are committed back to `main` with `[skip ci]`.
-3. The package is built and published to PyPI.
-4. The tag `v<version>` is created and a GitHub release is opened with
-   `RELEASE.md` as its body, followed by GitHub's generated
+1. Open a pull request that bumps the version. As long as no tag `v<version>`
+   exists, the [release-notes workflow](.github/workflows/release-notes.yml)
+   runs `scripts/release_notes.py` and `scripts/update_supported_versions.py`
+   on every push and commits the result to the pull request branch: the new
+   section at the top of [`CHANGELOG.md`](CHANGELOG.md), `RELEASE.md`
+   (overwritten on every release) and `supported_versions.json`. Edit the
+   `CHANGELOG.md` section in the pull request if needed; `RELEASE.md` follows
+   on the next push.
+2. Once the pull request is merged, the
+   [publish workflow](.github/workflows/publish-pypi.yml) builds the package,
+   publishes it to PyPI, creates the tag `v<version>` and opens a GitHub
+   release with `RELEASE.md` as its body, followed by GitHub's generated
    "What's Changed" section.
+3. `main` is protected, so the publish workflow never pushes to it. If the
+   release notes on `main` were not up to date, it opens a follow-up pull
+   request with the files the release was built with.
 
 If `CHANGELOG.md` already contains a `## [<version>]` section, those
 hand-written notes are used as-is. Otherwise they are generated from the commit
