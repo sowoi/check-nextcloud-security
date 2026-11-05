@@ -162,6 +162,22 @@ def existing_entry(version: str) -> str | None:
     return match.group("body").strip("\n")
 
 
+def refresh_date(version: str, released: str) -> bool:
+    """Set the date in the header of an existing version section.
+
+    Returns True if the header was changed.
+    """
+    text = CHANGELOG.read_text(encoding="utf-8")
+    pattern = re.compile(
+        rf"^(## \[{re.escape(version)}\]) - \d{{4}}-\d{{2}}-\d{{2}}[ \t]*$", re.MULTILINE
+    )
+    updated, count = pattern.subn(rf"\g<1> - {released}", text, count=1)
+    if count == 0 or updated == text:
+        return False
+    CHANGELOG.write_text(updated, encoding="utf-8")
+    return True
+
+
 def prepend_changelog(version: str, released: str, body: str) -> None:
     """Insert a new version section directly below the changelog header."""
     entry = f"## [{version}] - {released}\n\n{body.rstrip()}\n"
@@ -184,6 +200,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", default=None, help="Version to document. Default: pyproject.toml.")
     parser.add_argument("--previous-tag", default=None, help="Tag to compare against. Default: latest tag.")
     parser.add_argument("--date", default=None, help="Release date. Default: today (UTC).")
+    parser.add_argument(
+        "--refresh-date",
+        action="store_true",
+        help="Also set the release date of an already documented section.",
+    )
     args = parser.parse_args(argv)
 
     version = args.version or project_version()
@@ -195,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
         since = args.previous_tag or previous_tag(version)
         body = generate_body(since)
         prepend_changelog(version, released, body)
+    elif args.refresh_date and refresh_date(version, released):
+        print(f"Release date of {version} set to {released}", file=sys.stderr)
 
     RELEASE.write_text(
         f"## check-nextcloud-security {version}\n\n{body.rstrip()}\n", encoding="utf-8"
