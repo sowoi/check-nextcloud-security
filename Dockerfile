@@ -8,7 +8,7 @@ FROM python:3.15-slim AS builder
 
 # uv is this project's dependency manager and build front end; the same
 # command is used in CI (see .github/workflows/publish-pypi.yml).
-COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/
 
 WORKDIR /src
 
@@ -27,7 +27,7 @@ LABEL org.opencontainers.image.title="check-nextcloud-security" \
       org.opencontainers.image.source="https://github.com/sowoi/check-nextcloud-security" \
       org.opencontainers.image.licenses="GPL-3.0-only"
 
-COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /bin/
 COPY --from=builder /dist/*.whl /tmp/
 
 # Dependencies are resolved from the wheel metadata (pyproject.toml);
