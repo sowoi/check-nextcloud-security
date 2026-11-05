@@ -5,7 +5,8 @@ name: Release notes
 # as soon as a pull request carries a version without a tag, this workflow
 # runs scripts/release_notes.py (and refreshes the supported Nextcloud
 # versions) and pushes the result to the pull request branch. It runs again on
-# every push, so RELEASE.md follows later edits of the CHANGELOG.md section.
+# every push, so RELEASE.md follows later edits of the CHANGELOG.md section
+# and the release date in CHANGELOG.md is the day of the last push.
 #
 # Commits pushed with GITHUB_TOKEN do not trigger workflows, so this cannot
 # loop.
@@ -58,7 +59,7 @@ jobs:
 
       - name: Update CHANGELOG.md and RELEASE.md
         if: steps.check_tag.outputs.exists != 'true'
-        run: python scripts/release_notes.py --version "${{ steps.version.outputs.version }}"
+        run: python scripts/release_notes.py --version "${{ steps.version.outputs.version }}" --refresh-date
 
       - name: Commit release notes to the pull request
         if: steps.check_tag.outputs.exists != 'true'
