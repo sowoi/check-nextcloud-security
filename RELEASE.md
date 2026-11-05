@@ -1,12 +1,17 @@
-## check-nextcloud-security 1.6.1
+## check-nextcloud-security 1.6.2
+
+### Fixed
+
+- **Release date in `CHANGELOG.md`.** The date of a release section was set
+  when the release pull request was opened and never changed again. The
+  release-notes workflow now sets it on every push to the pull request
+  (`scripts/release_notes.py --refresh-date`), so it matches the day of the
+  last change before the merge.
 
 ### Changed
 
-- **Dependencies updated** to the latest releases: `types-requests`
-  2.33.0.20261030, plus the locked transitive packages `filelock`,
-  `mypy-extensions`, `platformdirs`, `python-discovery` and `virtualenv`.
-- **Docker image uses uv 0.13.7.**
-- The GitHub Actions were already on their latest releases (`actions/checkout`
-  v7, `actions/dependency-review-action` v5, `astral-sh/setup-uv` v10.3.3,
-  `peter-evans/create-pull-request` v8, `shundor/python-bandit-scan` at the
-  head of its default branch); no change was needed.
+- **Release notes are written in the release pull request.** `main` is
+  protected, so the publish workflow no longer pushes to it. A new
+  `release-notes` workflow commits `CHANGELOG.md`, `RELEASE.md` and
+  `supported_versions.json` to the pull request; if they are out of date at
+  release time, the publish workflow opens a follow-up pull request.
